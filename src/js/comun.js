@@ -151,3 +151,14 @@ export async function editarPago(post, pago, base = '') {
     toast.fire({ icon: 'success', title: r.mensaje });
     return true;
 }
+
+// ── Gastos: avisa si parece repetido y deja confirmarlo ─────────────────────
+// Devuelve la respuesta del servidor, o { codigo: 0, cancelado: true } si el usuario no confirma.
+export async function postGasto(post, ruta, datos) {
+    let r = await post(ruta, datos);
+    if (r.codigo !== 1 && r.duplicado) {
+        if (!(await confirmar(r.mensaje, 'Sí, es otro gasto'))) return { codigo: 0, cancelado: true };
+        r = await post(ruta, { ...datos, confirmar_duplicado: 1 });
+    }
+    return r;
+}

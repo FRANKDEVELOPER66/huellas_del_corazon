@@ -1,5 +1,5 @@
 import Swal from 'sweetalert2';
-import { $, ORO, esc, num, Q, Q0, toast, crearApi, confirmar, error, opciones, hoy, mesActual, fecha, signo, cobrarVenta, editarPago } from '../comun.js';
+import { $, ORO, esc, num, Q, Q0, toast, crearApi, confirmar, error, opciones, hoy, mesActual, fecha, signo, cobrarVenta, editarPago, postGasto } from '../comun.js';
 
 const BASE = $('appVentas').dataset.base || '';
 const { get, post } = crearApi(BASE);
@@ -57,7 +57,7 @@ async function detalle(id) {
 
     const filasGastos = gastos.length
         ? gastos.map((g) => `<tr><td>${fecha(g.fecha)}</td><td>${esc(g.categoria)}${g.descripcion ? ` · ${esc(g.descripcion)}` : ''}</td><td class="text-end">${Q(g.monto)}</td>
-            <td class="text-end text-nowrap">${g.comprobante ? `<a class="me-2" href="${BASE}/API/gastos/comprobante?id=${g.id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}<button class="btn btn-sm btn-link p-0 me-2" data-edit-gasto="${g.id}" title="Editar gasto"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-link text-danger p-0" data-del-gasto="${g.id}" title="Eliminar gasto"><i class="bi bi-trash"></i></button></td></tr>`).join('')
+            <td class="text-end text-nowrap">${g.comprobante ? `<a class="me-2" href="${BASE}/API/gastos/comprobante?id=${g.id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}<button class="btn btn-sm btn-link p-0 me-2" data-edit-gasto="${g.id}" title="Editar gasto"><i class="bi bi-pencil"></i></button></td></tr>`).join('')
         : '<tr><td colspan="4" class="hc-ayuda">Sin gastos registrados para esta pieza</td></tr>';
 
     const res = await Swal.fire({
@@ -82,7 +82,7 @@ async function detalle(id) {
                     <tr><td>Ganancia estimada</td><td class="text-end">${v.ganancia_estimada === null ? '—' : Q(v.ganancia_estimada)}</td></tr>
                     <tr><td><b>Ganancia real</b>${num(v.gastos_pendientes) === 1 ? ' <span class="hc-chip">est.</span>' : ''}</td><td class="text-end fw-bold ${signo(v.ganancia_real)}">${Q(v.ganancia_real)} (${v.margen_real_pct === null ? '—' : `${num(v.margen_real_pct)}%`})</td></tr>
                 </tbody></table>
-                ${num(v.gastos_pendientes) === 1 ? '<div class="hc-ayuda mb-2">Esta ganancia aún es estimada: con “Agregar gasto” registra lo que de verdad pagaste (pintora, envío) y se vuelve real.</div>' : ''}
+                ${num(v.gastos_pendientes) === 1 ? '<div class="hc-ayuda mb-2">Esta ganancia aún es estimada: falta pagar la pintora, el envío u otros. Regístralo en Gastos > Pagos pendientes y se vuelve real.</div>' : ''}
                 <button class="btn btn-sm btn-outline-danger" data-del-venta="${v.id}"><i class="bi bi-trash"></i> Eliminar venta</button>
             </div>`,
         showConfirmButton: saldo > 0,
@@ -97,9 +97,8 @@ async function detalle(id) {
             popup.addEventListener('click', async (e) => {
                 const ep = e.target.closest('[data-edit-pago]');
                 const eg = e.target.closest('[data-edit-gasto]');
-                const bg = e.target.closest('[data-del-gasto]');
                 const bv = e.target.closest('[data-del-venta]');
-                if (!ep && !eg && !bg && !bv) return;
+                if (!ep && !eg && !bv) return;
 
                 Swal.close();
                 if (bv) return eliminarVenta(v);
@@ -109,9 +108,6 @@ async function detalle(id) {
                     await editarPago(post, pagos.find((x) => String(x.id) === ep.dataset.editPago), BASE);
                 } else if (eg) {
                     await editarGasto(gastos.find((x) => String(x.id) === eg.dataset.editGasto));
-                } else if (await confirmar('¿Eliminar este gasto?')) {
-                    const r2 = await post('gastos/eliminar', { id: bg.dataset.delGasto });
-                    if (r2.codigo !== 1) await error(r2);
                 }
                 await cargar();
                 detalle(id);
@@ -176,7 +172,7 @@ async function editarGasto(g) {
 async function agregarGasto(v) {
     if (!categorias.length) categorias = (await get('gastos/categorias')).datos || [];
     // Primero las categorías que se ligan a una pieza (pintora, envíos)
-    const ordenadas = [...categorias].sort((a, b) => num(b.directo) - num(a.directo));
+    const ordenadas = categorias.filter((c) => c.tipo === 'directo');
 
     const { value } = await Swal.fire({
         titleText: 'Gasto de esta pieza',
@@ -190,7 +186,12 @@ async function agregarGasto(v) {
                 <input id="gMonto" type="number" min="0" step="any" class="form-control mb-2">
                 <label class="form-label mb-1">Fecha</label>
                 <input id="gFecha" type="date" class="form-control mb-2" value="${hoy()}">
-                <label class="form-label mb-1">Comprobante de la transferencia (opcional)</label>
+                <label class="form-label mb-1">Pagado con</label>
+                <select id="gOrigen" class="form-select mb-2">
+                    <option value="caja">Caja del negocio</option>
+                    <option value="bolsillo">De mi bolsillo</option>
+                </select>
+                <label class="form-label mb-1">Comprobante de la transferencia (obligatorio desde Q100)</label>
                 <input id="gArchivo" type="file" accept="image/*,application/pdf" class="form-control">
             </div>`,
         focusConfirm: false,
@@ -215,13 +216,15 @@ async function agregarGasto(v) {
                 descripcion: p.querySelector('#gDescripcion').value.trim() || sel.options[sel.selectedIndex].text,
                 monto,
                 fecha: p.querySelector('#gFecha').value,
+                origen: p.querySelector('#gOrigen').value,
                 comprobante: p.querySelector('#gArchivo').files[0] || null,
             };
         },
     });
     if (!value) return false;
 
-    const r = await post('gastos/crear', { venta_id: v.id, ...value });
+    const r = await postGasto(post, 'gastos/crear', { venta_id: v.id, ...value });
+    if (r.cancelado) return false;
     if (r.codigo !== 1) {
         await error(r);
         return false;

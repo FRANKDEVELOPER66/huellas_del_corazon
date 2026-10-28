@@ -46,7 +46,7 @@ function kpis(e) {
 function resultados(e, caja) {
     const c = e.costo;
     const aviso = c.estimados > 0
-        ? ` <b>(${c.estimados} pieza${c.estimados > 1 ? 's' : ''} con costo estimado: registra el gasto real en Ventas &gt; Detalle)</b>`
+        ? ` <b>(${c.estimados} pieza${c.estimados > 1 ? 's' : ''} con costos por pagar: regístralos en Gastos &gt; Pagos pendientes)</b>`
         : '';
 
     const operativos = e.operativos.length
@@ -71,7 +71,10 @@ function resultados(e, caja) {
 
         ${fila(caja.disponible < 0 ? 'rojo' : 'ambar', 'CAJA DISPONIBLE HOY', 'Es el dinero con el que compras filamento y pagas lo pendiente. No es lo mismo que la utilidad: viene de lo cobrado, lo que aportas y lo que ya pagaste.', Q(caja.disponible), 'est-total mt-4')}
         ${sub('Caja (cobrado + aportes − retiros − pagado)', Q(caja.caja))}
-        ${sub('(−) Por pagar a la pintora, envíos y otros (pago sin registrar)', Q(caja.por_pagar))}`;
+        ${sub('(−) Por pagar a la pintora, envíos y otros (pago sin registrar)', Q(caja.por_pagar))}
+        ${sub('De lo disponible: ganancia que ya puedes retirar', Q(caja.ganancia_retirable))}
+        ${sub('De lo disponible: reserva para repuestos y equipo', Q(caja.reserva))}
+        ${sub('De lo disponible: para reponer material y fabricar (no es ganancia)', Q(caja.para_reponer))}`;
 }
 
 // ── Barra: de cada Q100 que vendes ──────────────────────────────────────────
@@ -128,7 +131,7 @@ function piezas(e) {
                 <td>${fecha(p.fecha)}</td>
                 <td><b>${esc(p.descripcion)}</b></td>
                 <td class="text-end">${Q0(p.precio)}</td>
-                <td class="text-end">${Q(p.costo)}${p.estimado ? ' <span class="hc-chip" title="Pintora y envío estimados de la cotización">est.</span>' : ''}</td>
+                <td class="text-end">${Q(p.costo)}${p.estimado ? ' <span class="hc-chip" title="Aún falta pagar pintora, envío u otros de esta pieza">est.</span>' : ''}</td>
                 <td class="text-end fw-bold ${signo(p.ganancia)}">${Q(p.ganancia)}</td>
             </tr>`).join('')
         : vacio(5, 'Ninguna pieza se entregó este mes.');
@@ -143,19 +146,19 @@ function balance(b, mes) {
                 <h6 class="text-uppercase" style="color:#117a43">Lo que tienes</h6>
                 ${fila(b.efectivo < 0 ? 'rojo' : 'verde', 'Efectivo', `Cobrado ${Q(b.cobros)} + aportes ${Q(b.aportes)} − retiros ${Q(b.retiros)} − pagado ${Q(b.pagos)}`, Q(b.efectivo))}
                 ${fila('verde', 'Por cobrar', 'Ventas entregadas que aún no te pagan completas', Q(b.por_cobrar))}
-                ${fila(b.inventario < 0 ? 'rojo' : 'ambar', 'Inventario de filamento', `Comprado ${Q(b.compras_inv)} − usado ${Q(b.material_usado)}`, Q(b.inventario))}
+                ${fila(b.inventario < 0 ? 'rojo' : 'ambar', 'Inventario de filamento', `Comprado ${Q(b.compras_inv)} − usado ${Q(b.material_usado)}${b.inventario < 0 ? ' · registra tus compras de filamento en Gastos' : ''}`, Q(b.inventario))}
                 ${fila('ambar', 'Producción en proceso', 'Material y pagos a la pintora de piezas sin entregar', Q(b.en_proceso))}
-                ${fila('verde', 'TOTAL QUE TIENES', '', Q(b.activos), 'est-total')}
+                ${fila('verde', 'TOTAL QUE TIENES', 'Todo lo que el negocio posee hoy (efectivo + material + trabajo en proceso). No es tu ganancia ni lo que puedes gastar', Q(b.activos), 'est-total')}
             </div>
             <div class="col-lg-4">
                 <h6 class="text-uppercase" style="color:#b26a00">Lo que debes</h6>
-                ${fila('ambar', 'Anticipos de clientes', 'Dinero que ya cobraste de piezas que todavía no entregas: aún no es tuyo', Q(b.pasivos))}
+                ${fila('ambar', 'Anticipos de clientes', 'Dinero que ya cobraste de piezas que todavía no entregas: aún no es tuyo', Q(b.anticipos))}
                 ${fila('ambar', 'Por pagar a la pintora y envíos', 'Costo de piezas entregadas que todavía no pagas', Q(b.por_pagar))}
                 ${fila('ambar', 'TOTAL QUE DEBES', '', Q(b.pasivos), 'est-total')}
             </div>
             <div class="col-lg-4">
                 <h6 class="text-uppercase" style="color:#1d5fa8">Lo que vale el negocio</h6>
-                ${fila('azul', 'PATRIMONIO', 'Lo que tienes menos lo que debes', Q(b.patrimonio), 'est-total')}
+                ${fila('azul', 'PATRIMONIO', 'Lo que tienes menos lo que debes: el capital que pusiste más lo que ganaste y dejaste en el negocio', Q(b.patrimonio), 'est-total')}
                 <div class="hc-ayuda mt-2">No cuadra al centavo con la utilidad neta: la luz, el desgaste y el empaque se estiman por pieza y no salen de la caja.</div>
             </div>
         </div>`;

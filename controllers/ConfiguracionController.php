@@ -4,6 +4,8 @@ namespace Controllers;
 
 use MVC\Router;
 use Model\Configuracion;
+use Model\Reporte;
+use Model\ActiveRecord;
 
 class ConfiguracionController
 {
@@ -46,5 +48,28 @@ class ConfiguracionController
             $resultado['resultado'] !== false ? 'Configuración guardada. Aplica a las cotizaciones nuevas' : 'Error al guardar la configuración',
             ['id' => $resultado['id'] ?? null]
         );
+    }
+
+    // Meta de la reserva para repuestos y equipo
+    public static function reservaAPI(Router $router): void
+    {
+        getHeadersApi();
+        self::responder(1, '', ['datos' => ['meta' => Reporte::reservaMeta(), 'caja' => Reporte::caja()]]);
+    }
+
+    public static function guardarReservaAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        if (!isset($_POST['meta']) || !is_numeric($_POST['meta']) || (float) $_POST['meta'] < 0 || (float) $_POST['meta'] > 1000000) {
+            self::responder(0, 'Escribe la meta en quetzales (0 o más)');
+        }
+        $meta = round((float) $_POST['meta'], 2);
+
+        ActiveRecord::getDB()
+            ->prepare("INSERT INTO ajustes (clave, valor) VALUES ('reserva_repuestos', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)")
+            ->execute([(string) $meta]);
+
+        self::responder(1, 'Meta de reserva guardada: Q' . number_format($meta, 2));
     }
 }

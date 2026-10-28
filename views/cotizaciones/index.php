@@ -60,6 +60,37 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
         top: 1rem;
     }
 
+    .empaque-op {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .empaque-op input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .empaque-op span {
+        display: inline-block;
+        padding: .35rem .8rem;
+        border: 1px solid var(--hc-borde);
+        border-radius: 999px;
+        font-size: .85rem;
+        background: #fff;
+    }
+
+    .empaque-op input:checked + span {
+        background: #111;
+        color: var(--hc-dorado);
+        border-color: #111;
+        font-weight: 600;
+    }
+
+    .empaque-op input:focus-visible + span {
+        outline: 2px solid var(--hc-dorado);
+    }
+
     .hc-ayuda {
         font-size: .8rem;
         color: #777;
@@ -241,8 +272,14 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
                         <input type="number" id="costoPintura" class="form-control" min="0" step="any" placeholder="Monto que cobra">
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label mb-1" for="costoEnvio">Envíos (Q)</label>
-                        <input type="number" id="costoEnvio" class="form-control" min="0" step="any" value="0">
+                        <label class="form-label mb-1" for="envioPintora">Envío a la pintora (Q)</label>
+                        <input type="number" id="envioPintora" class="form-control" min="0" step="any" value="0">
+                        <small class="hc-ayuda">De tu casa a donde pinta</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label mb-1" for="envioCliente">Envío al cliente (Q)</label>
+                        <input type="number" id="envioCliente" class="form-control" min="0" step="any" value="0">
+                        <small class="hc-ayuda">De la pintora al cliente. Total envíos: <b id="envioTotal">Q0.00</b></small>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label mb-1" for="otrosInsumos">Otros insumos (Q)</label>
@@ -250,6 +287,15 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
                     </div>
                 </div>
                 <p class="hc-ayuda mt-2 mb-0">Si eliges pintor y escribes el alto, la pintura se llena sola con su tarifa. Si escribes un monto, ese manda.</p>
+
+                <div class="mt-3">
+                    <label class="form-label mb-1">Empaque de esta pieza</label>
+                    <div id="empaqueOpciones" class="d-flex flex-wrap gap-2"></div>
+                    <div id="empaqueOtroBox" class="mt-2 d-none" style="max-width: 200px;">
+                        <input type="number" id="empaqueCosto" class="form-control" min="0" step="any" placeholder="Monto en Q">
+                    </div>
+                    <p class="hc-ayuda mt-1 mb-0">Una figura pequeña no necesita la misma caja que un set de varias piezas. Los empaques se administran en Catálogos &gt; Empaques.</p>
+                </div>
             </div>
 
             <!-- ── Partes ─────────────────────────────────────────────────── -->

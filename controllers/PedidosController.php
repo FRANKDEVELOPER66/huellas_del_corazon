@@ -4,8 +4,10 @@ namespace Controllers;
 
 use MVC\Router;
 use Model\ActiveRecord;
+use Model\Inventario;
 use Model\Pago;
 use Model\Pedido;
+use Model\Reporte;
 use Model\Venta;
 
 class PedidosController
@@ -49,17 +51,15 @@ class PedidosController
              v.id AS venta_id, v.precio_venta,
              COALESCE(pg.pagado, 0) AS pagado,
              v.precio_venta - COALESCE(pg.pagado, 0) AS saldo,
-             COALESCE(q.costo_pintura, 0) AS pintora_acordada,
-             COALESCE(gp.total, 0) AS pintora_pagada
+             CASE WHEN cp.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_pintura, 0) - COALESCE(gp.pintura, 0), 0) END AS falta_pintura,
+             CASE WHEN ce.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_envio, 0) - COALESCE(gp.envio, 0), 0) END AS falta_envio,
+             CASE WHEN co.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.otros_insumos, 0) - COALESCE(gp.otros, 0), 0) END AS falta_otros
       FROM pedidos p
       JOIN clientes c ON c.id = p.cliente_id
       LEFT JOIN ventas v ON v.pedido_id = p.id
       LEFT JOIN (SELECT venta_id, SUM(monto) AS pagado FROM pagos GROUP BY venta_id) pg ON pg.venta_id = v.id
       LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
-      LEFT JOIN (SELECT g.venta_id, SUM(g.monto) AS total
-                 FROM gastos g JOIN categorias_gasto cg ON cg.id = g.categoria_id
-                 WHERE g.venta_id IS NOT NULL AND cg.nombre LIKE 'Pintura%'
-                 GROUP BY g.venta_id) gp ON gp.venta_id = v.id
+      " . Reporte::joinsCostos() . "
       WHERE (? = '' OR p.estado = ?)
       ORDER BY p.fecha_pedido DESC, p.id DESC",
             [$estado, $estado]
@@ -185,6 +185,18 @@ class PedidosController
         $siguiente = self::SIGUIENTE[$pedido->estado] ?? null;
         if (!$siguiente) {
             self::responder(0, 'Este pedido ya está en una etapa final y no se puede cambiar');
+        }
+
+        // Para empezar a imprimir tiene que haber filamento suficiente en el inventario
+        if ($siguiente === 'imprimiendo') {
+            $faltan = Inventario::faltantes((int)$pedido->id);
+            if ($faltan) {
+                $txt = array_map(
+                    fn($f) => $f['nombre'] . ': necesita ' . number_format($f['necesita_kg'], 3) . ' kg y hay ' . number_format($f['disponible_kg'], 3) . ' kg',
+                    $faltan
+                );
+                self::responder(0, 'No hay filamento suficiente para imprimir. ' . implode('; ', $txt) . '. Registra la compra (o tu inventario inicial) en Gastos > Inventario de filamento');
+            }
         }
 
         if (!self::cambiarEtapa((int)$pedido->id, $pedido->estado, $siguiente)) {

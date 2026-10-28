@@ -12,6 +12,7 @@ class Calculadora
      * @param Configuracion $cfg    Configuración vigente
      * @param array         $partes Cada una con: gramos, minutos, costo_kg (del material)
      * @param float|null    $margen Margen en % (si es null usa el de la configuración)
+     * @param float|null    $empaqueFijo Costo del empaque elegido para esta cotización (si es null usa el estándar de la configuración)
      */
     public static function calcular(
         Configuracion $cfg,
@@ -19,7 +20,8 @@ class Calculadora
         float $costoPintura = 0,
         float $costoEnvio = 0,
         float $otros = 0,
-        $margen = null
+        $margen = null,
+        $empaqueFijo = null
     ): array {
         $gramos = 0.0;
         $minutos = 0;
@@ -37,7 +39,7 @@ class Calculadora
 
         $luz = $horas * (float) $cfg->consumo_watts / 1000 * (float) $cfg->tarifa_kwh;
         $desgaste = $horas * (float) $cfg->desgaste_hora;
-        $empaque = (float) $cfg->empaque;
+        $empaque = $empaqueFijo === null ? (float) $cfg->empaque : max(0.0, (float) $empaqueFijo);
 
         $costoTotal = $material + $luz + $desgaste + $empaque + $costoPintura + $costoEnvio + $otros;
 

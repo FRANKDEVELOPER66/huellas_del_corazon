@@ -73,16 +73,38 @@ function llenarPintores() {
     $('pintorId').value = actual;
 }
 
+let empaques = [];
+
+function llenarEmpaques() {
+    const actual = document.querySelector('input[name="empaque"]:checked')?.value ?? '';
+    const op = (valor, texto) => `
+        <label class="empaque-op"><input type="radio" name="empaque" value="${valor}"><span>${texto}</span></label>`;
+    $('empaqueOpciones').innerHTML =
+        op('', 'Estándar')
+        + empaques.map((e) => op(e.id, `${esc(e.nombre)} · ${Q0(e.costo)}`)).join('')
+        + op('otro', 'Otro monto');
+    const hay = document.querySelector(`input[name="empaque"][value="${actual}"]`);
+    (hay || document.querySelector('input[name="empaque"][value=""]')).checked = true;
+    actualizarEmpaqueOtro();
+}
+
+function actualizarEmpaqueOtro() {
+    $('empaqueOtroBox').classList.toggle('d-none', document.querySelector('input[name="empaque"]:checked')?.value !== 'otro');
+}
+
 async function cargarCatalogos() {
-    const [m, p, c] = await Promise.all([
+    const [m, p, c, e] = await Promise.all([
         get('materiales/listar', { activos: 1 }),
         get('pintores/listar', { activos: 1 }),
         get('clientes/listar'),
+        get('empaques/listar', { activos: 1 }),
     ]);
     materiales = m.datos || [];
     pintores = p.datos || [];
     clientes = c.datos || [];
+    empaques = e.datos || [];
     llenarClientes();
+    llenarEmpaques();
     llenarPintores();
     if (!materiales.length) {
         toast.fire({ icon: 'warning', title: 'Registra un material en Catálogos > Materiales' });
@@ -116,6 +138,23 @@ function leerPartes() {
         .filter((p) => p.gramos > 0);
 }
 
+function datosEmpaque() {
+    const v = document.querySelector('input[name="empaque"]:checked')?.value ?? '';
+    if (v === 'otro') return { empaque_costo: $('empaqueCosto').value || 0 };
+    return v ? { empaque_id: v } : {};
+}
+
+function actualizarEnvioTotal() {
+    const t = (parseFloat($('envioPintora').value) || 0) + (parseFloat($('envioCliente').value) || 0);
+    $('envioTotal').textContent = Q(t);
+}
+
+// "Envíos (Q40 a la pintora + Q40 al cliente)" cuando la cotización separó los tramos
+function envioEtiqueta(d) {
+    if (d.envio_pintora === null || d.envio_pintora === undefined) return 'Envíos';
+    return `Envíos <small class="text-muted">(${Q(d.envio_pintora)} a la pintora + ${Q(d.envio_cliente)} al cliente)</small>`;
+}
+
 function datosFormulario() {
     return {
         partes: JSON.stringify(leerPartes()),
@@ -124,9 +163,11 @@ function datosFormulario() {
         alto_cm: $('altoCm').value,
         pintor_id: $('pintorId').value,
         costo_pintura: $('costoPintura').value,
-        costo_envio: $('costoEnvio').value || 0,
+        envio_pintora: $('envioPintora').value || 0,
+        envio_cliente: $('envioCliente').value || 0,
         otros_insumos: $('otrosInsumos').value || 0,
         margen_pct: $('margenPct').value,
+        ...datosEmpaque(),
     };
 }
 
@@ -168,9 +209,9 @@ const filasCostos = (d) => [
     ['Filamento (con merma)', d.costo_material],
     ['Luz', d.costo_luz],
     ['Desgaste de la máquina', d.costo_desgaste],
-    ['Empaque', d.costo_empaque],
+    [d.empaque_nombre ? `Empaque (${esc(d.empaque_nombre)})` : 'Empaque', d.costo_empaque],
     ['Pintura', d.costo_pintura],
-    ['Envíos', d.costo_envio],
+    [envioEtiqueta(d), d.costo_envio],
     ['Otros insumos', d.otros_insumos],
 ].map(([t, v]) => `<tr><td>${t}</td><td>${Q(v)}</td></tr>`).join('')
     + `<tr class="total"><td>Costo de fabricación</td><td>${Q(d.costo_total)}</td></tr>`;
@@ -191,8 +232,14 @@ function pintar({ datos: d, alternativas }) {
 // ── Guardar y limpiar ───────────────────────────────────────────────────────
 function limpiar() {
     ['nombrePieza', 'altoCm', 'costoPintura', 'margenPct'].forEach((id) => ($(id).value = ''));
-    $('costoEnvio').value = 0;
+    $('envioPintora').value = 0;
+    $('envioCliente').value = 0;
+    actualizarEnvioTotal();
     $('otrosInsumos').value = 0;
+    $('empaqueCosto').value = '';
+    llenarEmpaques();
+    document.querySelector('input[name="empaque"][value=""]').checked = true;
+    actualizarEmpaqueOtro();
     $('clienteId').value = '';
     $('pintorId').value = '';
     $('partes').innerHTML = '';
@@ -430,7 +477,9 @@ async function abrirVenta(id) {
 }
 
 // ── Eventos ─────────────────────────────────────────────────────────────────
-raiz.addEventListener('input', () => {
+raiz.addEventListener('input', (e) => {
+    if (e.target.name === 'empaque') actualizarEmpaqueOtro();
+    actualizarEnvioTotal();
     liberarGuardar();
     programarCalculo();
 });

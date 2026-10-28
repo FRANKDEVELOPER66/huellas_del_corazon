@@ -27,12 +27,12 @@ async function cargar() {
 }
 
 // ── Tablero ─────────────────────────────────────────────────────────────────
-// Aviso: la pieza ya va (o ya pasó) por la pintora y todavía no le pagas
+// Aviso: la pieza ya va (o ya pasó) por la pintora y quedan costos sin pagar (pintora, envío, otros)
 function avisoPintora(p) {
-    const falta = num(p.pintora_acordada) - num(p.pintora_pagada);
+    const faltas = [['pintora', num(p.falta_pintura)], ['envío', num(p.falta_envio)], ['otros', num(p.falta_otros)]].filter(([, v]) => v > 0.005);
     const enEtapa = ['impreso', 'pintando', 'listo', 'entregado'].includes(p.estado);
-    if (!p.venta_id || falta <= 0.005 || !enEtapa) return '';
-    return `<a href="${BASE}/gastos" class="small neg d-block mt-1" title="Registra el pago en Gastos"><i class="bi bi-palette"></i> Falta pagar a la pintora: <b>${Q(falta)}</b></a>`;
+    if (!p.venta_id || !faltas.length || !enEtapa) return '';
+    return `<a href="${BASE}/gastos" class="small neg d-block mt-1" title="Regístralo en Gastos > Pagos pendientes"><i class="bi bi-exclamation-circle"></i> Falta pagar: ${faltas.map(([n, v]) => `${n} <b>${Q(v)}</b>`).join(' · ')}</a>`;
 }
 
 function botonEtapa(p) {
@@ -323,6 +323,8 @@ async function registrarVenta(p) {
                 <input id="vPrecio" type="number" min="0" step="any" class="form-control mb-2">
                 <label class="form-label mb-1">Anticipo recibido (Q)</label>
                 <input id="vAnticipo" type="number" min="0" step="any" class="form-control mb-2" value="0">
+                <label class="form-label mb-1">Comprobante del anticipo <span class="hc-ayuda">(captura de la transferencia)</span></label>
+                <input id="vArchivo" type="file" accept="image/*,application/pdf" class="form-control mb-2">
                 <label class="form-label mb-1">Fecha de la venta</label>
                 <input id="vFecha" type="date" class="form-control" value="${hoy()}">
             </div>`,
@@ -343,7 +345,16 @@ async function registrarVenta(p) {
                 Swal.showValidationMessage('El anticipo no puede ser mayor al precio');
                 return false;
             }
-            return { precio_venta: precio, anticipo, fecha_venta: pop.querySelector('#vFecha').value };
+            const archivo = pop.querySelector('#vArchivo').files[0] || null;
+            if (archivo && archivo.size > 5 * 1024 * 1024) {
+                Swal.showValidationMessage('El comprobante pesa más de 5 MB');
+                return false;
+            }
+            if (archivo && !(anticipo > 0)) {
+                Swal.showValidationMessage('Subiste un comprobante pero el anticipo está en 0');
+                return false;
+            }
+            return { precio_venta: precio, anticipo, fecha_venta: pop.querySelector('#vFecha').value, comprobante: archivo };
         },
     });
     if (!value) return;

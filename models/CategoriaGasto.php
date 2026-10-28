@@ -6,12 +6,13 @@ class CategoriaGasto extends ModeloBase
 {
     protected static $tabla = 'categorias_gasto';
     protected static $idTabla = 'id';
-    protected static $columnasDB = ['id', 'nombre', 'directo', 'tipo'];
+    protected static $columnasDB = ['id', 'nombre', 'directo', 'tipo', 'concepto'];
 
     public $id;
     public $nombre;
     public $directo;
     public $tipo;
+    public $concepto;
 
     public function __construct($args = [])
     {
@@ -19,6 +20,7 @@ class CategoriaGasto extends ModeloBase
         $this->nombre = $args['nombre'] ?? '';
         $this->directo = $args['directo'] ?? 0;
         $this->tipo = $args['tipo'] ?? 'operativo';
+        $this->concepto = $args['concepto'] ?? null;
     }
 
     public function validar()

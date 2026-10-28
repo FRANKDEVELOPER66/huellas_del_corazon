@@ -6,7 +6,7 @@ class Cotizacion extends ModeloBase
 {
     protected static $tabla = 'cotizaciones';
     protected static $idTabla = 'id';
-    protected static $columnasDB = ['id', 'cliente_id', 'configuracion_id', 'pintor_id', 'nombre_pieza', 'alto_cm', 'costo_pintura', 'costo_envio', 'otros_insumos', 'total_gramos', 'total_minutos', 'costo_material', 'costo_luz', 'costo_desgaste', 'costo_empaque', 'costo_total', 'margen_pct_usado', 'precio_sugerido'];
+    protected static $columnasDB = ['id', 'cliente_id', 'configuracion_id', 'pintor_id', 'nombre_pieza', 'alto_cm', 'costo_pintura', 'costo_envio', 'envio_pintora', 'envio_cliente', 'otros_insumos', 'total_gramos', 'total_minutos', 'costo_material', 'costo_luz', 'costo_desgaste', 'costo_empaque', 'empaque_nombre', 'costo_total', 'margen_pct_usado', 'precio_sugerido'];
 
     public $id;
     public $cliente_id;
@@ -16,6 +16,8 @@ class Cotizacion extends ModeloBase
     public $alto_cm;
     public $costo_pintura;
     public $costo_envio;
+    public $envio_pintora;
+    public $envio_cliente;
     public $otros_insumos;
     public $total_gramos;
     public $total_minutos;
@@ -23,6 +25,7 @@ class Cotizacion extends ModeloBase
     public $costo_luz;
     public $costo_desgaste;
     public $costo_empaque;
+    public $empaque_nombre;
     public $costo_total;
     public $margen_pct_usado;
     public $precio_sugerido;
@@ -38,6 +41,8 @@ class Cotizacion extends ModeloBase
         $this->alto_cm = $args['alto_cm'] ?? null;
         $this->costo_pintura = $args['costo_pintura'] ?? 0;
         $this->costo_envio = $args['costo_envio'] ?? 0;
+        $this->envio_pintora = $args['envio_pintora'] ?? null;
+        $this->envio_cliente = $args['envio_cliente'] ?? null;
         $this->otros_insumos = $args['otros_insumos'] ?? 0;
         $this->total_gramos = $args['total_gramos'] ?? 0;
         $this->total_minutos = $args['total_minutos'] ?? 0;
@@ -45,6 +50,7 @@ class Cotizacion extends ModeloBase
         $this->costo_luz = $args['costo_luz'] ?? 0;
         $this->costo_desgaste = $args['costo_desgaste'] ?? 0;
         $this->costo_empaque = $args['costo_empaque'] ?? 0;
+        $this->empaque_nombre = $args['empaque_nombre'] ?? null;
         $this->costo_total = $args['costo_total'] ?? 0;
         $this->margen_pct_usado = $args['margen_pct_usado'] ?? null;
         $this->precio_sugerido = $args['precio_sugerido'] ?? 0;

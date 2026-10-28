@@ -69,6 +69,7 @@ $activo = fn(string $ruta): string => $rutaActual === $ruta ? 'active' : '';
                             <li><a class="dropdown-item nav-link text-white" href="<?= $base ?>/clientes"><i class="ms-lg-0 ms-2 bi bi-people me-2"></i>Clientes</a></li>
                             <li><a class="dropdown-item nav-link text-white" href="<?= $base ?>/pintores"><i class="ms-lg-0 ms-2 bi bi-palette me-2"></i>Pintores y tarifas</a></li>
                             <li><a class="dropdown-item nav-link text-white" href="<?= $base ?>/materiales"><i class="ms-lg-0 ms-2 bi bi-layers me-2"></i>Materiales</a></li>
+                            <li><a class="dropdown-item nav-link text-white" href="<?= $base ?>/empaques"><i class="ms-lg-0 ms-2 bi bi-box-seam me-2"></i>Empaques</a></li>
                             <li><a class="dropdown-item nav-link text-white" href="<?= $base ?>/configuracion"><i class="ms-lg-0 ms-2 bi bi-sliders me-2"></i>Costos y margen</a></li>
                         </ul>
                     </div>

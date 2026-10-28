@@ -34,7 +34,7 @@ class VentasController
         getHeadersApi();
 
         $id = (int)($_GET['id'] ?? 0);
-        $venta = ActiveRecord::fetchArray('SELECT * FROM v_ventas WHERE id = ?', [$id]);
+        $venta = ($fila = Reporte::ventaPorId($id)) ? [$fila] : [];
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
@@ -105,6 +105,9 @@ class VentasController
             self::responder(0, 'El anticipo no puede ser negativo ni mayor al precio de venta');
         }
 
+        // Comprobante del anticipo (captura de la transferencia). Si no hay anticipo, no se guarda nada.
+        $comprobante = $anticipo > 0 ? self::guardarComprobante() : null;
+
         $db = ActiveRecord::getDB();
         $db->beginTransaction();
 
@@ -132,7 +135,8 @@ class VentasController
                     'venta_id' => $ventaId,
                     'monto'    => $anticipo,
                     'tipo'     => 'anticipo',
-                    'fecha'    => $venta->fecha_venta
+                    'fecha'    => $venta->fecha_venta,
+                    'comprobante' => $comprobante
                 ]);
                 $pago->crear();
             }
@@ -140,6 +144,7 @@ class VentasController
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
+            self::borrarComprobante($comprobante);
             self::responder(0, 'No se pudo registrar la venta');
         }
 

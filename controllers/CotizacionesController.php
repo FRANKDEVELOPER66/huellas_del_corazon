@@ -7,6 +7,7 @@ use Model\ActiveRecord;
 use Model\Calculadora;
 use Model\Configuracion;
 use Model\Cotizacion;
+use Model\Empaque;
 use Model\CotizacionParte;
 use Model\Material;
 use Model\Pintor;
@@ -41,7 +42,8 @@ class CotizacionesController
 
     // Vista previa en vivo: calcula sin guardar nada.
     // POST: partes (JSON: [{nombre, material_id, gramos, minutos}]), alto_cm, pintor_id,
-    //       costo_pintura (vacío = tarifa del pintor), costo_envio, otros_insumos, margen_pct (opcional)
+    //       costo_pintura (vacío = tarifa del pintor), costo_envio, otros_insumos, margen_pct (opcional),
+    //       empaque_id (vacío = estándar de la configuración) o empaque_costo (monto libre)
     public static function calcularAPI(Router $router): void
     {
         getHeadersApi();
@@ -50,7 +52,7 @@ class CotizacionesController
 
         $alternativas = [];
         foreach ([30, 40, 50] as $m) {
-            $alternativas[$m] = Calculadora::calcular($cfg, $partes, $r['costo_pintura'], $r['costo_envio'], $r['otros_insumos'], $m)['precio_sugerido'];
+            $alternativas[$m] = Calculadora::calcular($cfg, $partes, $r['costo_pintura'], $r['costo_envio'], $r['otros_insumos'], $m, $r['costo_empaque'])['precio_sugerido'];
         }
 
         self::responder(1, '', ['datos' => $r, 'alternativas' => $alternativas]);
@@ -206,9 +208,16 @@ class CotizacionesController
             $costoPintura = $pintor ? ($pintor->tarifaPara($alto) ?? 0) : 0;
         }
         $costoPintura = (float)$costoPintura;
-        $costoEnvio = (float)($_POST['costo_envio'] ?? 0);
+        // Envío en dos tramos: Cobán → pintora y pintora → cliente. El costo de envío es la suma.
+        // (Si solo llega costo_envio, como antes, se usa tal cual y no se separa en tramos.)
+        $envioPintora = trim((string)($_POST['envio_pintora'] ?? ''));
+        $envioCliente = trim((string)($_POST['envio_cliente'] ?? ''));
+        $conTramos = $envioPintora !== '' || $envioCliente !== '';
+        $envioPintora = $conTramos ? (float)$envioPintora : null;
+        $envioCliente = $conTramos ? (float)$envioCliente : null;
+        $costoEnvio = $conTramos ? $envioPintora + $envioCliente : (float)($_POST['costo_envio'] ?? 0);
         $otros = (float)($_POST['otros_insumos'] ?? 0);
-        if (min($costoPintura, $costoEnvio, $otros) < 0) {
+        if (min($costoPintura, $costoEnvio, $otros, $envioPintora ?? 0, $envioCliente ?? 0) < 0) {
             self::responder(0, 'Los costos no pueden ser negativos');
         }
 
@@ -217,7 +226,29 @@ class CotizacionesController
             self::responder(0, 'El margen debe estar entre 0 y 99.99');
         }
 
-        $resultado = Calculadora::calcular($cfg, $partes, $costoPintura, $costoEnvio, $otros, $margen);
+        // Empaque: del catálogo, un monto libre, o (vacío) el estándar de la configuración
+        $empaqueFijo = null;
+        $empaqueNombre = 'Estándar';
+        $empaqueId = (int)($_POST['empaque_id'] ?? 0);
+        if ($empaqueId) {
+            $empaque = Empaque::find($empaqueId);
+            if (!$empaque) {
+                self::responder(0, 'Empaque inválido');
+            }
+            $empaqueFijo = (float)$empaque->costo;
+            $empaqueNombre = $empaque->nombre;
+        } elseif (($_POST['empaque_costo'] ?? '') !== '') {
+            $empaqueFijo = (float)$_POST['empaque_costo'];
+            if ($empaqueFijo < 0) {
+                self::responder(0, 'El empaque no puede ser negativo');
+            }
+            $empaqueNombre = 'Otro monto';
+        }
+
+        $resultado = Calculadora::calcular($cfg, $partes, $costoPintura, $costoEnvio, $otros, $margen, $empaqueFijo);
+        $resultado['empaque_nombre'] = $empaqueNombre;
+        $resultado['envio_pintora'] = $envioPintora;
+        $resultado['envio_cliente'] = $envioCliente;
 
         return [$cfg, $partes, $resultado, $pintorId, $alto];
     }

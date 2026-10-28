@@ -6,7 +6,7 @@ class Aporte extends ModeloBase
 {
     protected static $tabla = 'aportes';
     protected static $idTabla = 'id';
-    protected static $columnasDB = ['id', 'fecha', 'tipo', 'monto', 'descripcion'];
+    protected static $columnasDB = ['id', 'fecha', 'tipo', 'monto', 'descripcion', 'gasto_id'];
 
     public const TIPOS = ['aporte', 'retiro'];
 
@@ -15,6 +15,7 @@ class Aporte extends ModeloBase
     public $tipo;
     public $monto;
     public $descripcion;
+    public $gasto_id;
     public $creado_en;
 
     public function __construct($args = [])
@@ -24,6 +25,7 @@ class Aporte extends ModeloBase
         $this->tipo = $args['tipo'] ?? 'aporte';
         $this->monto = $args['monto'] ?? 0;
         $this->descripcion = $args['descripcion'] ?? '';
+        $this->gasto_id = $args['gasto_id'] ?? null;
         $this->creado_en = $args['creado_en'] ?? null;
     }
 

@@ -6,7 +6,7 @@ class Gasto extends ModeloBase
 {
     protected static $tabla = 'gastos';
     protected static $idTabla = 'id';
-    protected static $columnasDB = ['id', 'fecha', 'categoria_id', 'venta_id', 'pintor_id', 'descripcion', 'monto', 'comprobante'];
+    protected static $columnasDB = ['id', 'fecha', 'categoria_id', 'venta_id', 'pintor_id', 'descripcion', 'monto', 'comprobante', 'origen'];
 
     public $id;
     public $fecha;
@@ -16,6 +16,7 @@ class Gasto extends ModeloBase
     public $descripcion;
     public $monto;
     public $comprobante;
+    public $origen;
     public $creado_en;
 
     public function __construct($args = [])
@@ -28,6 +29,7 @@ class Gasto extends ModeloBase
         $this->descripcion = $args['descripcion'] ?? '';
         $this->monto = $args['monto'] ?? 0;
         $this->comprobante = $args['comprobante'] ?? null;
+        $this->origen = $args['origen'] ?? 'caja';
         $this->creado_en = $args['creado_en'] ?? null;
     }
 

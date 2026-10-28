@@ -37,7 +37,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
                 <tbody></tbody>
             </table>
         </div>
-        <p class="hc-ayuda mt-2 mb-0">Mientras no registres los gastos de una pieza (pintora, envío), su ganancia usa los costos de la cotización y aparece marcada como “est.”. Ábrela con “Detalle” y usa “Agregar gasto” con lo que de verdad pagaste, y se vuelve real.</p>
+        <p class="hc-ayuda mt-2 mb-0">Mientras falte pagar la pintora, el envío u otros insumos de una pieza, su ganancia usa el costo de la cotización y aparece marcada como “est.”. Regístralos en Gastos > Pagos pendientes y se vuelve real.</p>
     </div>
 </div>
 

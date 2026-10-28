@@ -14,6 +14,8 @@ use Controllers\PedidosController;
 use Controllers\PintoresController;
 use Controllers\VentasController;
 use Controllers\CajaController;
+use Controllers\EmpaquesController;
+use Controllers\InventarioController;
 
 $router = new Router();
 $router->setBaseURL('/' . $_ENV['APP_NAME']);
@@ -94,14 +96,37 @@ $router->post('/API/materiales/eliminar',   [MaterialesController::class, 'elimi
 // ---- API: configuración de costos ----
 $router->get('/API/configuracion/vigente',  [ConfiguracionController::class, 'vigenteAPI']);
 $router->post('/API/configuracion/guardar', [ConfiguracionController::class, 'guardarAPI']);
+// ---- API: reserva para repuestos y equipo (usa ConfiguracionController, ya importado) ----
+$router->get('/API/configuracion/reserva',   [ConfiguracionController::class, 'reservaAPI']);
+$router->post('/API/configuracion/reserva',  [ConfiguracionController::class, 'guardarReservaAPI']);
+
 
 $router->get('/API/caja/resumen',   [CajaController::class, 'resumenAPI']);
 $router->post('/API/caja/crear',    [CajaController::class, 'crearAPI']);
 $router->post('/API/caja/eliminar', [CajaController::class, 'eliminarAPI']);
+$router->get('/API/caja/conciliacion',  [CajaController::class, 'conciliacionAPI']);
+$router->post('/API/caja/conciliar',    [CajaController::class, 'conciliarAPI']);
+
 
 $router->post('/API/ventas/pago/actualizar', [VentasController::class, 'actualizarPagoAPI']);
 $router->get('/API/gastos/comprobante',      [GastosController::class, 'comprobanteAPI']);
 $router->get('/API/gastos/pintora',          [GastosController::class, 'pintoraAPI']);
+
+$router->post('/API/gastos/cerrar', [GastosController::class, 'cerrarAPI']);
+
+$router->get('/empaques', [EmpaquesController::class, 'index']);
+$router->get('/API/empaques/listar',      [EmpaquesController::class, 'listarAPI']);
+$router->post('/API/empaques/crear',      [EmpaquesController::class, 'crearAPI']);
+$router->post('/API/empaques/actualizar', [EmpaquesController::class, 'actualizarAPI']);
+$router->post('/API/empaques/eliminar',   [EmpaquesController::class, 'eliminarAPI']);
+
+
+$router->get('/API/inventario/resumen',     [InventarioController::class, 'resumenAPI']);
+$router->post('/API/inventario/comprar',    [InventarioController::class, 'comprarAPI']);
+$router->post('/API/inventario/actualizar', [InventarioController::class, 'actualizarAPI']);
+$router->get('/API/gastos/historial',       [GastosController::class, 'historialAPI']);
+
+
 
 // Comprueba y valida las rutas, que existan y les asigna las funciones del Controlador
 $router->comprobarRutas();
