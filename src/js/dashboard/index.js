@@ -1,5 +1,4 @@
 import { $, esc, num, Q, Q0, crearApi, error, mesActual, fecha, signo, etiquetaMes } from '../comun.js';
-import { Dropdown } from "bootstrap";
 
 
 const { get } = crearApi($('appBalance').dataset.base || '');

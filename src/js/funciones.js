@@ -1,5 +1,4 @@
 import Swal from 'sweetalert2';
-import { Dropdown } from "bootstrap";
 
 export const validarFormulario = (formulario, excepciones = [] ) => {
     const elements = formulario.querySelectorAll("input, select, textarea");

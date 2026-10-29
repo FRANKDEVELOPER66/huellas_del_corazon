@@ -1,4 +1,3 @@
-import { Dropdown } from "bootstrap";
 import Swal from 'sweetalert2';
 
 const raiz = document.getElementById('appCotizar');

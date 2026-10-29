@@ -1,7 +1,5 @@
 import Swal from 'sweetalert2';
 import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, mesActual, fecha, postGasto } from '../comun.js';
-import { Dropdown } from "bootstrap";
-
 
 const BASE = $('appGastos').dataset.base || '';
 const { get, post } = crearApi(BASE);

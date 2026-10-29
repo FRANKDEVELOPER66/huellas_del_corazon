@@ -1,4 +1,3 @@
-import { Dropdown } from "bootstrap";
 import Swal from 'sweetalert2';
 import { $, ORO, esc, toast, crearApi, confirmar, error } from '../comun.js';
 

@@ -1,6 +1,5 @@
 // Utilidades compartidas por las pantallas del cotizador (Ventas, Gastos, Pintores, Balance)
 import Swal from 'sweetalert2';
-import { Dropdown } from "bootstrap";
 
 
 export const ORO = '#c99a14';

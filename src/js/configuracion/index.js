@@ -1,5 +1,4 @@
 import { $, num, toast, crearApi, error, fecha, Q } from '../comun.js';
-import { Dropdown } from "bootstrap";
 
 
 const { get, post } = crearApi($('appConfig').dataset.base || '');
