@@ -1,5 +1,6 @@
 import Swal from 'sweetalert2';
 import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, fecha, cobrarVenta, editarPago } from '../comun.js';
+import { Dropdown } from "bootstrap";
 
 const BASE = $('appPedidos').dataset.base || '';
 const { get, post } = crearApi(BASE);
