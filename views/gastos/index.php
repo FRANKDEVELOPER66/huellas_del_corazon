@@ -53,26 +53,30 @@ include __DIR__ . '/../partials/hc-estilos.php';
             <div class="d-flex gap-2">
                 <button class="btn btn-sm btn-hc" id="btnAporte"><i class="bi bi-plus-circle me-1"></i>Poner dinero</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnRetiro"><i class="bi bi-dash-circle me-1"></i>Sacar dinero</button>
-                <button class="btn btn-sm btn-outline-primary" id="btnConciliar"><i class="bi bi-bank me-1"></i>Conciliar con el banco</button>
+                <button class="btn btn-sm btn-outline-success" id="btnCapital" disabled title="Se activa cuando el negocio valga varias veces tu inversión"><i class="bi bi-piggy-bank me-1"></i>Devolver capital</button>
+                <button class="btn btn-sm btn-outline-primary" id="btnConciliar"><i class="bi bi-lock me-1"></i>Cerrar período</button>
             </div>
         </div>
         <div id="cajaKpis"></div>
 
         <div id="conciliar" class="d-none mt-3 p-3" style="border:2px solid #1d5fa8;border-radius:14px;background:#f5f9ff">
-            <h3 class="h5 mb-1"><i class="bi bi-bank me-2"></i>Conciliar con el banco</h3>
-            <div class="hc-ayuda mb-3">Compara la caja de la app con el saldo real de tu cuenta. Marca los movimientos que ya ves en tu estado de cuenta y deja <b>sin marcar</b> los que anotaste en la app pero todavía no pasan por el banco. Lo que quede sin explicar es dinero que se movió en el banco sin registrarlo aquí.</div>
+            <h3 class="h5 mb-1"><i class="bi bi-lock me-2"></i>Cerrar período · conciliar con el banco</h3>
+            <div class="hc-ayuda mb-2">Elige hasta qué fecha cierras (fin de semana, de quincena o de mes), compara la caja de la app con el saldo real de tu banco en esa fecha y sube la captura. Al cerrar, <b>todo lo que tenga fecha hasta ese día queda bloqueado</b> y el mes se marca como <b>conciliado</b> en Resultados y balance.</div>
+            <div id="cEstado" class="mb-3"></div>
             <div class="row g-2 mb-3">
-                <div class="col-md-4"><label class="form-label mb-1" for="cSaldo">Saldo que ves en tu banco (Q)</label>
+                <div class="col-md-4"><label class="form-label mb-1" for="cHasta">Cerrar hasta (inclusive)</label>
+                    <input type="date" id="cHasta" class="form-control"></div>
+                <div class="col-md-4"><label class="form-label mb-1" for="cSaldo">Saldo de tu banco en esa fecha (Q)</label>
                     <input type="number" step="any" id="cSaldo" class="form-control" placeholder="Ej. 440.00"></div>
-                <div class="col-md-4"><label class="form-label mb-1" for="cFecha">Fecha del saldo</label>
-                    <input type="date" id="cFecha" class="form-control"></div>
-                <div class="col-md-4"><label class="form-label mb-1" for="cDesde">Revisar movimientos desde</label>
-                    <input type="date" id="cDesde" class="form-control"></div>
+                <div class="col-md-4"><label class="form-label mb-1" for="cArchivo">Captura o PDF del banco (obligatoria)</label>
+                    <input type="file" id="cArchivo" class="form-control" accept="image/*,application/pdf"></div>
             </div>
+            <div id="cAviso"></div>
             <div class="d-flex justify-content-between align-items-center mb-1">
-                <b>Movimientos de la caja que pasan por el banco</b>
+                <b>Movimientos del período que pasan por el banco</b>
                 <button type="button" class="btn btn-sm btn-outline-secondary" id="cTodos">Marcar todos</button>
             </div>
+            <div class="hc-ayuda mb-1">Marca los que ya ves en tu estado de cuenta. Deja <b>sin marcar</b> los que anotaste pero todavía no pasan por el banco: se seguirán mostrando en el próximo cierre.</div>
             <div class="table-responsive mb-3" style="max-height:320px;overflow:auto">
                 <table class="table table-sm align-middle mb-0 hc-tabla-nw" id="tablaConc">
                     <thead><tr><th class="text-center">Está en mi banco</th><th>Fecha</th><th>Tipo</th><th>Detalle</th><th class="text-end">Monto</th></tr></thead>
@@ -85,9 +89,9 @@ include __DIR__ . '/../partials/hc-estilos.php';
                 <input id="cNota" class="form-control" maxlength="500" placeholder="Ej. Faltan 2 envíos de Q40 pagados con la tarjeta; los registro hoy">
             </div>
             <div class="mt-3 d-flex gap-2">
-                <button class="btn btn-hc" id="btnGuardarConc"><i class="bi bi-check2-circle me-1"></i>Guardar conciliación</button>
+                <button class="btn btn-hc" id="btnGuardarConc"><i class="bi bi-lock-fill me-1"></i>Cerrar y bloquear período</button>
             </div>
-            <h4 class="h6 mt-4 mb-2">Conciliaciones anteriores</h4>
+            <h4 class="h6 mt-4 mb-2">Cierres anteriores</h4>
             <div id="cHistorial"></div>
         </div>
         <div class="table-responsive mt-3">

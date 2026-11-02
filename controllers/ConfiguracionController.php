@@ -54,7 +54,7 @@ class ConfiguracionController
     public static function reservaAPI(Router $router): void
     {
         getHeadersApi();
-        self::responder(1, '', ['datos' => ['meta' => Reporte::reservaMeta(), 'caja' => Reporte::caja()]]);
+        self::responder(1, '', ['datos' => ['meta' => Reporte::reservaMeta(), 'multiplo' => Reporte::capitalMultiplo(), 'alerta_g' => \Model\Inventario::alertaGramos(), 'caja' => Reporte::caja()]]);
     }
 
     public static function guardarReservaAPI(Router $router): void
@@ -66,10 +66,26 @@ class ConfiguracionController
         }
         $meta = round((float) $_POST['meta'], 2);
 
-        ActiveRecord::getDB()
-            ->prepare("INSERT INTO ajustes (clave, valor) VALUES ('reserva_repuestos', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)")
-            ->execute([(string) $meta]);
+        $db = ActiveRecord::getDB();
+        $guardar = $db->prepare("INSERT INTO ajustes (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)");
+        $guardar->execute(['reserva_repuestos', (string) $meta]);
 
-        self::responder(1, 'Meta de reserva guardada: Q' . number_format($meta, 2));
+        // Cuántas veces tu inversión debe valer el negocio para poder devolver capital (opcional)
+        if (isset($_POST['multiplo']) && $_POST['multiplo'] !== '') {
+            if (!is_numeric($_POST['multiplo']) || (float) $_POST['multiplo'] < 1 || (float) $_POST['multiplo'] > 100) {
+                self::responder(0, 'El múltiplo debe ser 1 o más (por ejemplo 3)');
+            }
+            $guardar->execute(['capital_multiplo', (string) round((float) $_POST['multiplo'], 2)]);
+        }
+
+        // Avisar cuando a un color le queden menos de estos gramos (opcional)
+        if (isset($_POST['alerta_g']) && $_POST['alerta_g'] !== '') {
+            if (!is_numeric($_POST['alerta_g']) || (float) $_POST['alerta_g'] < 0 || (float) $_POST['alerta_g'] > 5000) {
+                self::responder(0, 'El aviso de poco filamento va en gramos (entre 0 y 5,000)');
+            }
+            $guardar->execute(['alerta_carrete_g', (string) round((float) $_POST['alerta_g'], 0)]);
+        }
+
+        self::responder(1, 'Guardado: reserva de Q' . number_format($meta, 2));
     }
 }

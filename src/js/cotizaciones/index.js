@@ -14,6 +14,7 @@ const errorServidor = { codigo: 0, mensaje: 'No se pudo comunicar con el servido
 const PLACEHOLDER_RESULTADO = '<p class="hc-ayuda mb-0">Agrega los gramos y el tiempo de cada parte para ver el precio.</p>';
 
 let materiales = [];
+let colores = []; // colores con filamento: material_id, color, gramos, costo_kg
 let pintores = [];
 let clientes = [];
 let turno = 0;
@@ -92,12 +93,14 @@ function actualizarEmpaqueOtro() {
 }
 
 async function cargarCatalogos() {
-    const [m, p, c, e] = await Promise.all([
+    const [m, p, c, e, col] = await Promise.all([
         get('materiales/listar', { activos: 1 }),
         get('pintores/listar', { activos: 1 }),
         get('clientes/listar'),
         get('empaques/listar', { activos: 1 }),
+        get('inventario/colores'),
     ]);
+    colores = col.codigo === 1 ? col.datos || [] : [];
     materiales = m.datos || [];
     pintores = p.datos || [];
     clientes = c.datos || [];
@@ -119,11 +122,41 @@ function agregarParte() {
     fila.innerHTML = `
         <input type="text" class="form-control p-nombre" placeholder="Parte ${n}">
         <select class="form-select p-material">${opciones(materiales)}</select>
+        <select class="form-select p-color"></select>
         <input type="number" class="form-control p-gramos" min="0" step="any" placeholder="Gramos">
-        <input type="number" class="form-control p-horas" min="0" step="1" placeholder="Horas">
+        <input type="number" class="form-control p-horas" min="0" step="1" placeholder="Hrs">
         <input type="number" class="form-control p-minutos" min="0" step="any" placeholder="Min">
-        <button type="button" class="btn btn-outline-danger p-quitar" title="Quitar"><i class="bi bi-x-lg"></i></button>`;
+        <button type="button" class="btn btn-outline-danger p-quitar" title="Quitar"><i class="bi bi-x-lg"></i></button>
+        <div class="hc-ayuda p-aviso" style="grid-column: 1 / -1"></div>`;
     $('partes').appendChild(fila);
+    llenarColores(fila);
+}
+
+// Colores que tienes de ese material, con lo que queda y lo que cuesta por kg
+const gr = (n) => Number(n || 0).toLocaleString('es-GT', { maximumFractionDigits: 0 }) + ' g';
+function llenarColores(fila, elegido = '') {
+    const mat = fila.querySelector('.p-material').value;
+    const lista = colores.filter((c) => String(c.material_id) === String(mat));
+    const sel = fila.querySelector('.p-color');
+    sel.innerHTML = lista.length
+        ? `<option value="">Elige color…</option>` + lista.map((c) => `<option value="${esc(c.color)}" ${c.color === elegido ? 'selected' : ''}>${esc(c.color)} · ${gr(c.gramos)} · ${Q0(c.costo_kg)}</option>`).join('')
+        : `<option value="">Sin carretes (precio general)</option>`;
+    avisoColor(fila);
+}
+
+// Avisa si lo que pide la parte no alcanza con lo que queda de ese color
+function avisoColor(fila) {
+    const aviso = fila.querySelector('.p-aviso');
+    const color = fila.querySelector('.p-color').value;
+    const gramos = parseFloat(fila.querySelector('.p-gramos').value) || 0;
+    const c = colores.find((x) => String(x.material_id) === String(fila.querySelector('.p-material').value) && x.color === color);
+    if (c && gramos > Number(c.gramos)) {
+        aviso.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> De ${esc(c.color)} solo quedan ${gr(c.gramos)} y esta parte pide ${gr(gramos)} (sin contar la merma). Tendrás que comprar más antes de imprimir.</span>`;
+    } else if (c) {
+        aviso.innerHTML = `<i class="bi bi-disc"></i> ${esc(c.color)}: ${Q(c.costo_kg)} por kg · quedan ${gr(c.gramos)}`;
+    } else {
+        aviso.innerHTML = '';
+    }
 }
 
 function leerPartes() {
@@ -131,6 +164,7 @@ function leerPartes() {
         .map((f) => ({
             nombre: f.querySelector('.p-nombre').value.trim(),
             material_id: f.querySelector('.p-material').value,
+            color: f.querySelector('.p-color').value,
             gramos: parseFloat(f.querySelector('.p-gramos').value) || 0,
             minutos: (parseFloat(f.querySelector('.p-horas').value) || 0) * 60 + (parseFloat(f.querySelector('.p-minutos').value) || 0),
         }))
@@ -272,6 +306,14 @@ async function guardar() {
     if (!leerPartes().length) {
         return toast.fire({ icon: 'warning', title: 'Agrega los gramos de al menos una parte' });
     }
+    // Si el material tiene carretes registrados, hay que elegir el color: de ahí sale el precio real y el filamento
+    const sinColor = [...document.querySelectorAll('.parte-fila[data-parte]')].find((f) => {
+        const hayColores = colores.some((c) => String(c.material_id) === String(f.querySelector('.p-material').value));
+        return hayColores && !f.querySelector('.p-color').value && (parseFloat(f.querySelector('.p-gramos').value) || 0) > 0;
+    });
+    if (sinColor) {
+        return toast.fire({ icon: 'warning', title: `Elige el color de “${sinColor.querySelector('.p-nombre').value.trim() || 'cada parte'}”` });
+    }
 
     const r = await post('cotizaciones/crear', datos);
     if (r.codigo !== 1) {
@@ -384,7 +426,7 @@ async function verCuadre(id) {
     const imp = num(r.datos.impuesto_pct);
     const ganancia = num(c.precio_sugerido) / (1 + imp / 100) - num(c.costo_total);
     const partes = r.datos.partes.map((p) =>
-        `<tr><td>${esc(p.nombre)}</td><td>${esc(p.material)}</td><td class="text-end">${num(p.gramos)} g</td><td class="text-end">${tiempo(num(p.minutos))}</td></tr>`
+        `<tr><td>${esc(p.nombre)}</td><td>${esc(p.material)}${p.color ? ' · ' + esc(p.color) : ''}</td><td class="text-end">${num(p.gramos)} g</td><td class="text-end">${tiempo(num(p.minutos))}</td></tr>`
     ).join('');
 
     await Swal.fire({
@@ -477,6 +519,9 @@ async function abrirVenta(id) {
 
 // ── Eventos ─────────────────────────────────────────────────────────────────
 raiz.addEventListener('input', (e) => {
+    const fila = e.target.closest('.parte-fila[data-parte]');
+    if (fila && e.target.classList.contains('p-material')) llenarColores(fila);
+    if (fila && (e.target.classList.contains('p-color') || e.target.classList.contains('p-gramos'))) avisoColor(fila);
     if (e.target.name === 'empaque') actualizarEmpaqueOtro();
     actualizarEnvioTotal();
     liberarGuardar();

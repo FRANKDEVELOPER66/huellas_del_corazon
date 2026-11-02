@@ -35,6 +35,7 @@ class CajaController
         ]);
 
         self::errores($aporte->validar());
+        self::exigirAbierta($aporte->fecha);
 
         // Solo se puede sacar GANANCIA. El resto de la caja es para reponer material y pagar lo pendiente.
         if ($aporte->tipo === 'retiro') {
@@ -44,10 +45,24 @@ class CajaController
             }
         }
 
+        // Devolución de capital: solo cuando el negocio ya vale varias veces tu inversión y sobra dinero
+        // después de apartar lo que hay que reponer y la reserva. No es ganancia ni baja tu utilidad.
+        if ($aporte->tipo === 'devolucion') {
+            $k = Reporte::caja();
+            if (!$k['capital_sano']) {
+                self::responder(0, 'Todavía no: tu negocio vale Q' . number_format($k['patrimonio'], 2) . ' y debe valer Q' . number_format($k['capital_meta'], 2)
+                    . ' (' . rtrim(rtrim(number_format($k['capital_multiplo'], 2, '.', ''), '0'), '.') . ' veces tu inversión de Q' . number_format($k['inversion'], 2) . ') para devolver capital.');
+            }
+            if ($aporte->monto > $k['capital_devolvible'] + 0.005) {
+                self::responder(0, 'Puedes devolver hasta Q' . number_format($k['capital_devolvible'], 2)
+                    . ': es lo que sobra después de apartar el material por reponer y la reserva, sin pasar del capital que te queda por recuperar (Q' . number_format($k['capital_neto'], 2) . ').');
+            }
+        }
+
         $resultado = $aporte->crear();
         self::responder(
             $resultado['resultado'] !== false ? 1 : 0,
-            $resultado['resultado'] !== false ? ($aporte->tipo === 'aporte' ? 'Aporte registrado' : 'Retiro registrado') : 'Error al registrar',
+            $resultado['resultado'] !== false ? ($aporte->tipo === 'aporte' ? 'Aporte registrado' : ($aporte->tipo === 'devolucion' ? 'Devolución de capital registrada' : 'Retiro registrado')) : 'Error al registrar',
             ['id' => $resultado['id'] ?? null]
         );
     }
@@ -61,8 +76,14 @@ class CajaController
             self::responder(0, 'Movimiento no encontrado');
         }
 
+        self::exigirAbierta((string) $aporte->fecha);
+
         if ($aporte->gasto_id) {
             self::responder(0, 'Este aporte viene de un gasto que pagaste de tu bolsillo. Edita ese gasto en vez de borrar el aporte');
+        }
+
+        if ($aporte->tipo === 'devolucion') {
+            self::responder(0, 'Una devolución de capital no se borra. Si fue un error, registra un aporte por el mismo monto.');
         }
 
         $aporte->eliminar();

@@ -43,6 +43,10 @@ include __DIR__ . '/../partials/hc-estilos.php';
         color: #444;
     }
 
+    .sello { display: inline-block; padding: .15rem .6rem; border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: nowrap; vertical-align: middle; }
+    .sello-ok { background: #dcf5e7; color: #0d6b3a; }
+    .sello-mal { background: #fde4e1; color: #b42318; }
+    .sello-abierto { background: #eef0f3; color: #5b6472; }
     .apilada { display: flex; height: 30px; border-radius: 8px; overflow: hidden; background: #eee; }
     .apilada div { display: flex; align-items: center; justify-content: center; color: #fff; font-size: .75rem; font-weight: 700; min-width: 0; overflow: hidden; }
     .leyenda { display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .8rem; margin-top: .4rem; }
@@ -110,7 +114,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
                 <p class="hc-ayuda">Toca un mes para verlo arriba.</p>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0 hc-tabla-nw" id="tablaMeses">
-                        <thead><tr><th>Mes</th><th class="text-end">Ventas</th><th class="text-end">Costo</th><th class="text-end">Gastos op.</th><th class="text-end">Utilidad neta</th><th class="text-end">Margen</th></tr></thead>
+                        <thead><tr><th>Mes</th><th class="text-end">Ventas</th><th class="text-end">Costo</th><th class="text-end">Gastos op.</th><th class="text-end">Utilidad neta</th><th class="text-end">Margen</th><th class="text-end">Cierre</th></tr></thead>
                         <tbody></tbody>
                     </table>
                 </div>

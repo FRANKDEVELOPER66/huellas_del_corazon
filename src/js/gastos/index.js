@@ -220,20 +220,81 @@ async function cargarCaja() {
         <div class="caja-grid mt-2">
             ${kpi('#c98a00', 'trophy-fill', 'Ganancia que puedes retirar', Q(c.ganancia_retirable), 'Lo ganado con piezas entregadas, ya descontados costos, gastos de operación y lo que retiraste. Es lo único que puedes sacar de la caja (ya sin la reserva)')}
             ${kpi('#6d4c41', 'tools', 'Reserva para repuestos y equipo', `${Q(c.reserva)} <small style="font-size:.9rem;font-weight:400">de ${Q(c.reserva_meta)}</small>`, 'Parte de tu ganancia que se queda en el negocio para repuestos o equipo. Se cambia en Costos y margen')}
-            ${kpi('#7048e8', 'arrow-repeat', 'Para reponer material y fabricar', Q(c.para_reponer), 'Lo que costó fabricar lo que ya vendiste: filamento, luz, desgaste y empaque. No es ganancia')}
+            ${kpi('#7048e8', 'arrow-repeat', 'Para reponer material y capital', Q(c.para_reponer), `Se llena primero. Material por reponer: ${Q(c.material_cubierto)}${num(c.reponer_pendiente) > num(c.material_cubierto) + 0.005 ? ` de ${Q(c.reponer_pendiente)}` : ''} · tu capital en el negocio: ${Q(c.capital_en_negocio)}. No es ganancia`)}
         </div>
+        ${franjaCapital(c)}
         ${c.caja < 0 ? '<div class="hc-ayuda mt-2">La caja sale negativa porque pagaste cosas antes de cobrar. Si fue con tu dinero, regístralo con “Poner dinero”.</div>' : ''}`;
 
     document.querySelector('#tablaAportes tbody').innerHTML = movimientos.length
         ? movimientos.map((m) => `
             <tr>
                 <td>${fecha(m.fecha)}</td>
-                <td><span class="hc-chip">${m.tipo === 'aporte' ? 'Pusiste' : 'Sacaste'}</span></td>
+                <td><span class="hc-chip">${m.tipo === 'aporte' ? 'Pusiste' : m.tipo === 'devolucion' ? 'Capital devuelto' : 'Sacaste'}</span></td>
                 <td>${esc(m.descripcion)}</td>
                 <td class="text-end fw-bold" style="color:${m.tipo === 'aporte' ? '#117a43' : '#b42318'}">${m.tipo === 'aporte' ? '+' : '−'}${Q(m.monto)}</td>
-                <td class="text-end">${m.gasto_id ? '<span class="hc-ayuda" title="Viene de un gasto pagado de tu bolsillo: edita ese gasto">de un gasto</span>' : `<button class="btn btn-sm btn-outline-danger" data-del-mov="${m.id}"><i class="bi bi-trash"></i></button>`}</td>
+                <td class="text-end">${m.gasto_id ? '<span class="hc-ayuda" title="Viene de un gasto pagado de tu bolsillo: edita ese gasto">de un gasto</span>' : m.tipo === 'devolucion' ? '' : `<button class="btn btn-sm btn-outline-danger" data-del-mov="${m.id}"><i class="bi bi-trash"></i></button>`}</td>
             </tr>`).join('')
         : '<tr><td colspan="5" class="text-center text-muted py-2">Aún no registras dinero que pongas o saques del negocio.</td></tr>';
+}
+
+// Inversión y devolución de capital: se activa cuando el negocio vale varias veces lo que has puesto
+function franjaCapital(c) {
+    if (!(num(c.inversion) > 0)) return '';
+    const pct = Math.min(100, Math.round((num(c.patrimonio) / Math.max(num(c.capital_meta), 1)) * 100));
+    const veces = num(c.capital_multiplo);
+    const btn = $('btnCapital');
+    if (btn) {
+        btn.disabled = !c.capital_sano;
+        btn.title = c.capital_sano
+            ? `Puedes devolver hasta ${Q(c.capital_devolvible)}`
+            : `Se activa cuando el negocio valga ${veces} veces tu inversión (${Q(c.capital_meta)})`;
+    }
+    const detalle = c.capital_sano
+        ? `<b style="color:#087f5b">Negocio sano.</b> Puedes devolver hasta <b>${Q(c.capital_devolvible)}</b> de tu capital${num(c.capital_devolvible) < 0.005 ? ' (hoy no sobra dinero después de reponer material y llenar la reserva)' : ''}. Te quedan por recuperar ${Q(c.capital_neto)}.`
+        : `El botón “Devolver capital” se activa cuando el negocio valga <b>${veces} veces</b> lo que has puesto (${Q(c.capital_meta)}). Hoy vale <b>${Q(c.patrimonio)}</b>.`;
+    return `
+        <div class="mt-3 p-3" style="border:1px dashed #087f5b;border-radius:12px;background:#f1faf7">
+            <div class="d-flex justify-content-between flex-wrap gap-1 mb-1">
+                <b style="color:#087f5b"><i class="bi bi-piggy-bank me-1"></i>Tu inversión: ${Q(c.inversion)}</b>
+                <span class="hc-ayuda">Patrimonio ${Q(c.patrimonio)} de ${Q(c.capital_meta)}</span>
+            </div>
+            <div class="progress mb-2" style="height:10px"><div class="progress-bar" style="width:${pct}%;background:#087f5b"></div></div>
+            <div class="hc-ayuda">${detalle} <span class="text-muted">Incluye lo que pusiste en efectivo y el filamento que ya tenías.</span></div>
+        </div>`;
+}
+
+async function formDevolver() {
+    const c = cajaActual;
+    const { value } = await Swal.fire({
+        titleText: 'Devolver capital',
+        html: `
+            <div class="text-start">
+                <div class="hc-ayuda mb-2">Dinero que pusiste y ahora recuperas. No es ganancia ni baja tu utilidad. Hoy puedes devolver hasta <b>${Q(c?.capital_devolvible ?? 0)}</b>.</div>
+                <label class="form-label mb-1">Monto (Q)</label>
+                <input id="dMonto" type="number" min="0" step="any" class="form-control mb-2" max="${c?.capital_devolvible ?? 0}">
+                <label class="form-label mb-1">Detalle</label>
+                <input id="dDetalle" class="form-control mb-2" value="Devolución de capital">
+                <label class="form-label mb-1">Fecha</label>
+                <input id="dFecha" type="date" class="form-control" value="${hoy()}">
+            </div>`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Devolver',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: ORO,
+        preConfirm: () => {
+            const p = Swal.getPopup();
+            const monto = parseFloat(p.querySelector('#dMonto').value);
+            if (!(monto > 0)) { Swal.showValidationMessage('Escribe el monto'); return false; }
+            if (monto > num(c?.capital_devolvible) + 0.005) { Swal.showValidationMessage(`Puedes devolver hasta ${Q(c?.capital_devolvible)}`); return false; }
+            return { tipo: 'devolucion', monto, descripcion: p.querySelector('#dDetalle').value.trim() || 'Devolución de capital', fecha: p.querySelector('#dFecha').value };
+        },
+    });
+    if (!value) return;
+    const r = await post('caja/crear', value);
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    cargarCaja();
 }
 
 async function formMovimiento(tipo) {
@@ -278,6 +339,7 @@ async function formMovimiento(tipo) {
 
 $('btnAporte').addEventListener('click', () => formMovimiento('aporte'));
 $('btnRetiro').addEventListener('click', () => formMovimiento('retiro'));
+$('btnCapital').addEventListener('click', () => formDevolver());
 $('tablaAportes').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-del-mov]');
     if (!b || !(await confirmar('¿Eliminar este movimiento de caja?'))) return;
@@ -286,52 +348,76 @@ $('tablaAportes').addEventListener('click', async (e) => {
     cargarCaja();
 });
 
-// ── Conciliación con el banco ───────────────────────────────────────────────
-// Compara la caja de la app con el saldo real del banco. Marcas qué movimientos ya ves en el estado de
-// cuenta; los que no marcas son "registrados pero aún no pasan por el banco". Lo que sobre o falte es
-// dinero que se movió en el banco sin registrarse en la app.
+// ── Cierre de período: conciliar con el banco y bloquear ────────────────────
+// Eliges hasta qué fecha cierras, comparas la caja de la app (a esa fecha) con el saldo del banco y subes la
+// captura. Lo que no marcas es "registrado pero aún no pasa por el banco" y se arrastra al siguiente cierre.
+// Lo que sobre o falte es dinero que se movió en el banco sin registrarse en la app.
 let conc = null;
 
 async function cargarConciliacion() {
-    const r = await get('caja/conciliacion', $('cDesde').value ? { desde: $('cDesde').value } : {});
+    const r = await get('cierres/preparar', $('cHasta').value ? { hasta: $('cHasta').value } : {});
     if (r.codigo !== 1) return error(r);
     conc = r.datos;
-    $('cDesde').value = conc.desde;
-    $('cFecha').value = $('cFecha').value || hoy();
+    $('cHasta').value = conc.hasta;
 
-    const CHIP = { cobro: ['Cobro', '#117a43'], aporte: ['Pusiste', '#117a43'], retiro: ['Sacaste', '#b42318'], gasto: ['Gasto', '#b42318'] };
+    $('cEstado').innerHTML = conc.ultimo
+        ? `<div class="alert alert-success py-2 mb-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
+               <span><i class="bi bi-lock-fill me-1"></i>Cerrado hasta el <b>${fecha(conc.ultimo.hasta)}</b>. Lo nuevo empieza el ${fecha(conc.desde)}.</span>
+               <button class="btn btn-sm btn-outline-danger" id="btnReabrir" data-id="${conc.ultimo.id}"><i class="bi bi-unlock me-1"></i>Reabrir último cierre</button>
+           </div>`
+        : '<div class="alert alert-secondary py-2 mb-0"><i class="bi bi-unlock me-1"></i>Aún no has cerrado ningún período: todo se puede editar.</div>';
+
+    $('cAviso').innerHTML = conc.aviso ? `<div class="alert alert-warning py-2">${esc(conc.aviso)}</div>` : '';
+    if (!conc.aviso && conc.hasta === hoy()) {
+        $('cAviso').innerHTML = '<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle me-1"></i>Estás cerrando <b>hoy</b>: ya no podrás registrar nada con fecha de hoy hasta reabrir. Normalmente se cierra una fecha pasada (fin de semana, quincena o mes).</div>';
+    }
+
+    const CHIP = { cobro: ['Cobro', '#117a43'], aporte: ['Pusiste', '#117a43'], retiro: ['Sacaste', '#b42318'], devolucion: ['Capital devuelto', '#b42318'], gasto: ['Gasto', '#b42318'] };
     document.querySelector('#tablaConc tbody').innerHTML = conc.movimientos.length
         ? conc.movimientos.map((m) => `
             <tr>
                 <td class="text-center"><input type="checkbox" class="form-check-input c-visto" data-ref="${esc(m.ref)}" data-monto="${m.monto}" checked></td>
                 <td>${fecha(m.fecha)}</td>
-                <td><span class="hc-chip">${CHIP[m.tipo]?.[0] || m.tipo}</span></td>
+                <td><span class="hc-chip">${CHIP[m.tipo]?.[0] || m.tipo}</span>${m.arrastrado ? ' <span class="hc-chip" title="Quedó sin verse en el banco en el cierre anterior">del cierre anterior</span>' : ''}</td>
                 <td>${esc(m.descripcion)}</td>
                 <td class="text-end fw-bold" style="color:${m.monto >= 0 ? '#117a43' : '#b42318'}">${m.monto >= 0 ? '+' : '−'}${Q(Math.abs(m.monto))}</td>
             </tr>`).join('')
-        : '<tr><td colspan="5" class="text-center text-muted py-2">No hay movimientos desde esa fecha.</td></tr>';
+        : `<tr><td colspan="5" class="text-center text-muted py-2">${conc.aviso ? '—' : 'No hay movimientos en este período.'}</td></tr>`;
 
+    const estadoCierre = (h) => h.reabierto_en
+        ? `<span class="hc-chip" title="${esc(h.reabierto_motivo || '')}">Reabierto</span>`
+        : Math.abs(num(h.sin_explicar)) < 0.005
+            ? '<span class="hc-chip" style="background:#dcf5e7;color:#0d6b3a">✔ Conciliado</span>'
+            : `<span class="hc-chip" style="background:#fde4e1;color:#b42318">Sin explicar ${Q(h.sin_explicar)}</span>`;
     $('cHistorial').innerHTML = conc.historial.length
         ? `<div class="table-responsive"><table class="table table-sm align-middle mb-0 hc-tabla-nw">
-            <thead><tr><th>Fecha</th><th class="text-end">Banco</th><th class="text-end">Caja app</th><th class="text-end">Aún no pasa</th><th class="text-end">Sin explicar</th><th>Nota</th></tr></thead>
+            <thead><tr><th>Período</th><th class="text-end">Banco</th><th class="text-end">Caja app</th><th class="text-end">Aún no pasa</th><th>Estado</th><th>Nota</th><th>Captura</th></tr></thead>
             <tbody>${conc.historial.map((h) => `
-                <tr><td>${fecha(h.fecha)}</td><td class="text-end">${Q(h.saldo_banco)}</td><td class="text-end">${Q(h.saldo_caja)}</td>
+                <tr class="${h.reabierto_en ? 'text-muted' : ''}"><td>${fecha(h.desde)} → ${fecha(h.hasta)}</td>
+                <td class="text-end">${Q(h.saldo_banco)}</td><td class="text-end">${Q(h.saldo_sistema)}</td>
                 <td class="text-end">${Q(h.no_en_banco)}</td>
-                <td class="text-end fw-bold" style="color:${Math.abs(num(h.sin_explicar)) < 0.005 ? '#117a43' : '#b42318'}">${Math.abs(num(h.sin_explicar)) < 0.005 ? 'Cuadra' : Q(h.sin_explicar)}</td>
-                <td>${esc(h.nota || '')}</td></tr>`).join('')}</tbody></table></div>`
-        : '<div class="hc-ayuda">Aún no has conciliado. Hazlo al menos una vez al mes.</div>';
+                <td>${estadoCierre(h)}</td>
+                <td>${esc(h.reabierto_en ? `Reabierto: ${h.reabierto_motivo || ''}` : h.nota || '')}</td>
+                <td><a href="${BASE}/API/cierres/evidencia?id=${h.id}" target="_blank" rel="noopener"><i class="bi bi-image"></i> Ver</a></td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="hc-ayuda">Aún no has cerrado ningún período. Hazlo al menos una vez al mes.</div>';
 
     recalcularConciliacion();
 }
 
 function recalcularConciliacion() {
     if (!conc) return;
-    const caja = num(conc.caja.caja);
+    if (conc.saldo_sistema === null) {
+        $('cResultado').innerHTML = '';
+        $('cNotaWrap').classList.add('d-none');
+        return;
+    }
+    const caja = num(conc.saldo_sistema);
     const saldoTxt = $('cSaldo').value;
     const noEnBanco = [...document.querySelectorAll('.c-visto')].filter((c) => !c.checked).reduce((t, c) => t + num(c.dataset.monto), 0);
 
     if (saldoTxt === '') {
-        $('cResultado').innerHTML = `<div class="hc-ayuda">Escribe el saldo que ves hoy en tu banco para comparar con la caja de la app (${Q(caja)}).</div>`;
+        $('cResultado').innerHTML = `<div class="hc-ayuda">Escribe el saldo que ves en tu banco al ${fecha(conc.hasta)} para compararlo con la caja de la app a esa fecha (${Q(caja)}).</div>`;
+        $('cNotaWrap').classList.add('d-none');
         return;
     }
 
@@ -343,18 +429,18 @@ function recalcularConciliacion() {
     const mensaje = cuadra
         ? `<b>Cuadra.</b> ${Math.abs(noEnBanco) > 0.005 ? `La diferencia de ${Q(banco - caja)} se explica con los movimientos que marcaste como “aún no está en mi banco”.` : 'La caja de la app y tu banco son iguales.'}`
         : sin < 0
-            ? `<b>En el banco hay ${Q(-sin)} MENOS de lo esperado.</b> Salió dinero de tu cuenta que la app no sabe (por ejemplo, un envío que pagaste con la tarjeta). Búscalo en tu estado de cuenta y regístralo como gasto o como pago de la pieza.`
-            : `<b>En el banco hay ${Q(sin)} MÁS de lo esperado.</b> Entró dinero que la app no sabe (un cobro de una venta sin registrar, o dinero tuyo). Regístralo como cobro de la venta o con “Poner dinero”. También revisa si algún movimiento de la lista aún no sale del banco y desmárcalo.`;
+            ? `<b>En el banco hay ${Q(-sin)} MENOS de lo esperado.</b> Salió dinero de tu cuenta que la app no sabe (por ejemplo, un envío que pagaste con la tarjeta). Búscalo en tu estado de cuenta y regístralo con su fecha ANTES de cerrar.`
+            : `<b>En el banco hay ${Q(sin)} MÁS de lo esperado.</b> Entró dinero que la app no sabe (un cobro sin registrar, o dinero tuyo). Regístralo con su fecha ANTES de cerrar. También revisa si algún movimiento de la lista aún no sale del banco y desmárcalo.`;
 
     $('cResultado').innerHTML = `
         <div class="caja-grid">
-            <div class="caja-box azul"><span>Caja en la app</span><b>${Q(caja)}</b></div>
+            <div class="caja-box azul"><span>Caja en la app al ${fecha(conc.hasta)}</span><b>${Q(caja)}</b></div>
             <div class="caja-box azul"><span>Saldo en tu banco</span><b>${Q(banco)}</b></div>
             <div class="caja-box ${Math.abs(banco - caja) < 0.005 ? 'verde' : 'ambar'}"><span>Diferencia banco − caja</span><b>${Q(banco - caja)}</b></div>
         </div>
         <div class="caja-grid mt-2">
             <div class="caja-box ambar"><span>Registrado, aún no pasa por el banco</span><b>${Q(noEnBanco)}</b>
-                <small>Suma de lo que desmarcaste (pagos que anotaste pero todavía no haces, o cobros que aún no llegan)</small></div>
+                <small>Suma de lo que desmarcaste</small></div>
             <div class="caja-box ${cuadra ? 'verde' : 'rojo'}"><span>Sin explicar</span><b>${Q(sin)}</b>
                 <small>${cuadra ? 'Todo explicado' : 'Dinero que se movió en el banco sin registrarse'}</small></div>
         </div>
@@ -363,20 +449,50 @@ function recalcularConciliacion() {
 }
 
 async function guardarConciliacion() {
+    if (!conc || conc.aviso) return error({ mensaje: conc?.aviso || 'Elige la fecha del cierre' });
     if ($('cSaldo').value === '') return error({ mensaje: 'Escribe el saldo que muestra tu banco' });
+    const archivo = $('cArchivo').files[0];
+    if (!archivo) return error({ mensaje: 'Sube la captura (o el PDF) de tu banco donde se ve ese saldo' });
+
+    const ok = await confirmar(`Vas a cerrar hasta el ${fecha(conc.hasta)}. Después NO podrás registrar ni cambiar nada con fecha hasta ese día (solo reabriendo el cierre). ¿Cerrar?`, 'Sí, cerrar');
+    if (!ok) return;
+
     const noVistos = [...document.querySelectorAll('.c-visto')].filter((c) => !c.checked).map((c) => c.dataset.ref);
-    const r = await post('caja/conciliar', {
-        fecha: $('cFecha').value,
+    const r = await post('cierres/cerrar', {
+        hasta: conc.hasta,
         saldo_banco: $('cSaldo').value,
-        desde: conc?.desde || '',
         no_vistos: JSON.stringify(noVistos),
         nota: $('cNota').value.trim(),
+        comprobante: archivo,
     });
     if (r.codigo !== 1) return error(r);
     toast.fire({ icon: r.sin_explicar === 0 ? 'success' : 'warning', title: r.mensaje });
     $('cNota').value = '';
     $('cSaldo').value = '';
+    $('cArchivo').value = '';
+    $('cHasta').value = '';
     cargarConciliacion();
+    cargar();
+}
+
+async function reabrirCierre(id) {
+    const { value: motivo, isConfirmed } = await Swal.fire({
+        title: 'Reabrir el último cierre',
+        text: 'Podrás corregir lo que tenga fecha de ese período. Después tendrás que cerrarlo de nuevo.',
+        input: 'text',
+        inputPlaceholder: 'Por qué lo reabres (mínimo 5 letras)',
+        showCancelButton: true,
+        confirmButtonText: 'Reabrir',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#b42318',
+    });
+    if (!isConfirmed) return;
+    const r = await post('cierres/reabrir', { id, motivo: (motivo || '').trim() });
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    $('cHasta').value = '';
+    cargarConciliacion();
+    cargar();
 }
 
 $('btnConciliar').addEventListener('click', () => {
@@ -384,11 +500,15 @@ $('btnConciliar').addEventListener('click', () => {
     panel.classList.toggle('d-none');
     if (!panel.classList.contains('d-none')) cargarConciliacion();
 });
-$('cDesde').addEventListener('change', cargarConciliacion);
+$('cHasta').addEventListener('change', cargarConciliacion);
 $('cSaldo').addEventListener('input', recalcularConciliacion);
 $('tablaConc').addEventListener('change', recalcularConciliacion);
 $('cTodos').addEventListener('click', () => { document.querySelectorAll('.c-visto').forEach((c) => (c.checked = true)); recalcularConciliacion(); });
 $('btnGuardarConc').addEventListener('click', guardarConciliacion);
+$('cEstado').addEventListener('click', (e) => {
+    const b = e.target.closest('#btnReabrir');
+    if (b) reabrirCierre(b.dataset.id);
+});
 
 // ── Pagos pendientes de las piezas: pintora, envío y otros insumos ───────────
 const ETAPAS = { solicitado: 'Solicitado', imprimiendo: 'Imprimiendo', impreso: 'Impreso', pintando: 'En pintura', listo: 'Listo', entregado: 'Entregado' };
@@ -571,20 +691,21 @@ async function cargarInventario() {
             return `<tr>
                 <td><b>${esc(m.nombre)}</b>${num(m.activo) ? '' : ' <span class="hc-ayuda">(inactivo)</span>'}</td>
                 <td class="text-end">${kgf(m.comprado_kg)}</td>
-                <td class="text-end">${kgf(m.usado_kg)}</td>
+                <td class="text-end">${kgf(m.usado_kg)}${num(m.fallas_kg) > 0 ? `<div class="hc-ayuda neg">+ ${kgf(m.fallas_kg)} en fallas</div>` : ''}</td>
+                <td class="text-end ${num(m.ajustes_kg) < 0 ? 'txt-sin' : ''}">${num(m.ajustes_kg) ? (num(m.ajustes_kg) > 0 ? '+' : '') + kgf(m.ajustes_kg) : '—'}</td>
                 <td class="text-end fw-bold ${m.estado === 'ok' ? 'txt-ok' : m.estado === 'bajo' ? 'txt-bajo' : 'txt-sin'}">${kgf(m.disponible_kg)}</td>
                 <td class="text-end">${Q(m.costo_prom_kg)}</td>
                 <td class="text-end fw-bold">${Q(m.valor)}</td>
                 <td><span class="est ${cls}">${txt}</span></td>
             </tr>`;
         }).join('')
-        : '<tr><td colspan="7" class="text-center text-muted py-2">Aún no hay materiales. Créalos en Catálogos > Materiales.</td></tr>';
+        : '<tr><td colspan="8" class="text-center text-muted py-2">Aún no hay materiales. Créalos en Catálogos > Materiales.</td></tr>';
 
     const filasCompras = d.compras.length
         ? d.compras.map((c) => `
             <tr>
                 <td>${fecha(c.fecha)}</td>
-                <td>${esc(c.material)}</td>
+                <td>${esc(c.material)}${detalleCarretes(c.id)}</td>
                 <td class="text-end">${kgf(c.kg)}</td>
                 <td class="text-end">${Q(num(c.costo_total) / num(c.kg))}</td>
                 <td class="text-end fw-bold">${Q(c.costo_total)}</td>
@@ -600,20 +721,381 @@ async function cargarInventario() {
         <div class="caja-grid">
             ${kpi('#0b7285', 'box-seam-fill', 'Filamento disponible', kgf(d.total_kg), 'Lo que tienes para imprimir, sumando todos los materiales')}
             ${kpi('#d9480f', 'gem', 'Valor del inventario', Q(d.total_valor), 'Los kg disponibles al costo promedio de lo que has comprado')}
-            ${kpi(d.alertas > 0 ? '#b42318' : '#5f3dc4', d.alertas > 0 ? 'exclamation-triangle-fill' : 'check2-circle', 'Materiales por reponer', d.alertas, d.alertas > 0 ? `Con menos de ${num(d.minimo_kg)} kg o sin filamento` : `Todos con más de ${num(d.minimo_kg)} kg`)}
+            ${d.carretes_ok
+                ? kpi(d.alertas > 0 ? '#b42318' : '#5f3dc4', d.alertas > 0 ? 'exclamation-triangle-fill' : 'check2-circle', 'Colores por reponer', d.alertas, d.alertas > 0 ? `Con menos de ${gr(d.alerta_g)} o agotados y pedidos esperando` : `Todos los colores con más de ${gr(d.alerta_g)}`)
+                : kpi(d.alertas > 0 ? '#b42318' : '#5f3dc4', d.alertas > 0 ? 'exclamation-triangle-fill' : 'check2-circle', 'Materiales por reponer', d.alertas, d.alertas > 0 ? `Con menos de ${num(d.minimo_kg)} kg o sin filamento` : `Todos con más de ${num(d.minimo_kg)} kg`)}
         </div>
         <div class="table-responsive mt-3"><table class="table table-sm align-middle mb-0 hc-tabla-nw">
-            <thead><tr><th>Material</th><th class="text-end">Comprado</th><th class="text-end">Usado en piezas</th><th class="text-end">Disponible</th><th class="text-end">Costo prom./kg</th><th class="text-end">Valor</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Material</th><th class="text-end">Comprado</th><th class="text-end">Usado en piezas</th><th class="text-end">Ajustes de peso</th><th class="text-end">Disponible</th><th class="text-end">Costo prom./kg</th><th class="text-end">Valor</th><th>Estado</th></tr></thead>
             <tbody>${filasMat}</tbody></table></div>
         <div class="hc-ayuda mt-2">Los kg usados salen solos: cuando un pedido pasa a <b>Imprimiendo</b> se descuentan los gramos de sus partes (con la merma). Si no alcanza el filamento, el pedido no puede empezar a imprimir.</div>
+        ${bloqueAvisos(d)}
+        ${seccionCarretes(d)}
         <h3 class="h6 mt-3 mb-2">Compras y entradas de filamento</h3>
         <div class="table-responsive"><table class="table table-sm align-middle mb-0 hc-tabla-nw" id="tablaCompras">
             <thead><tr><th>Fecha</th><th>Material</th><th class="text-end">Cantidad</th><th class="text-end">Costo por kg</th><th class="text-end">Total</th><th>Origen del dinero</th><th></th></tr></thead>
             <tbody>${filasCompras}</tbody></table></div>`;
 }
 
+
+// ── Carretes ────────────────────────────────────────────────────────────────
+const COLORES_BASE = ['Negro', 'Blanco', 'Gris', 'Rojo', 'Azul', 'Celeste', 'Verde', 'Verde militar', 'Amarillo', 'Naranja', 'Dorado', 'Plateado', 'Rosado', 'Morado', 'Café', 'Beige', 'Transparente'];
+// Para pintar el puntito del color (lo más específico primero)
+const PUNTOS = [['verde militar', '#4b5320'], ['celeste', '#5bc0eb'], ['dorado', '#d4af37'], ['plateado', '#b8bcc2'], ['negro', '#1f1f1f'], ['blanco', '#f4f4f4'],
+    ['gris', '#8a8f98'], ['rojo', '#d62828'], ['azul', '#1d4ed8'], ['verde', '#2e9e4f'], ['amarillo', '#f4c20d'], ['naranja', '#f07b1c'], ['rosa', '#f48fb1'],
+    ['morado', '#7048e8'], ['café', '#7b4a2d'], ['cafe', '#7b4a2d'], ['beige', '#e1cfae'], ['transparente', '#dfe7ee']];
+const puntoColor = (color) => {
+    const c = String(color || '').toLowerCase();
+    const hit = PUNTOS.find(([k]) => c.includes(k));
+    return `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:-2px;margin-right:6px;border:1px solid #0003;background:${hit ? hit[1] : '#cfd4da'}"></span>`;
+};
+const gr = (n) => num(n).toLocaleString('es-GT', { maximumFractionDigits: 0 }) + ' g';
+const colorBarra = (pct) => (pct > 50 ? '#117a43' : pct >= 15 ? '#c98a00' : '#b42318');
+
+const detalleCarretes = (compraId) => {
+    const ks = (inventario.carretes || []).filter((k) => String(k.compra_id) === String(compraId));
+    if (!ks.length) return '';
+    const cuenta = {};
+    ks.forEach((k) => (cuenta[k.color] = (cuenta[k.color] || 0) + 1));
+    return `<div class="hc-ayuda">${Object.entries(cuenta).map(([c, n]) => `${n}× ${esc(c)}`).join(' · ')}</div>`;
+};
+
+function seccionCarretes(d) {
+    if (!d.carretes_ok) {
+        return '<div class="hc-ayuda mt-3"><b>Carretes:</b> falta ejecutar <code>sql/carretes.sql</code> para registrar cada carrete con su color.</div>';
+    }
+    const ks = d.carretes;
+    if (!ks.length) {
+        return '<h3 class="h6 mt-3 mb-2"><i class="bi bi-disc me-1"></i>Carretes</h3><div class="hc-ayuda">Aún no registras carretes. Usa <b>“Ya tenía filamento”</b> para los que tienes hoy, o <b>“Comprar filamento”</b> para los nuevos.</div>';
+    }
+    const orden = [...ks].sort((a, b) => Number(a.agotado) - Number(b.agotado));
+    const vivos = ks.filter((k) => !k.agotado);
+    const gramos = vivos.reduce((s, k) => s + num(k.gramos_actuales), 0);
+    const valor = vivos.reduce((s, k) => s + num(k.valor), 0);
+    const filas = orden.map((k) => {
+        const pct = Math.max(0, Math.min(100, (num(k.gramos_actuales) / num(k.peso_inicial_g)) * 100));
+        return `<tr class="${k.agotado ? 'text-muted' : ''}">
+            <td>${puntoColor(k.color)}<b>${esc(k.color)}</b></td>
+            <td>${esc(k.material)}</td>
+            <td style="min-width:170px">
+                <div class="d-flex justify-content-between"><b style="color:${k.agotado ? '#6c757d' : colorBarra(pct)}">${k.agotado ? 'Agotado' : gr(k.gramos_actuales)}</b><span class="hc-ayuda">de ${gr(k.peso_inicial_g)}</span></div>
+                <div style="height:6px;background:#e9ecef;border-radius:3px"><div style="height:6px;border-radius:3px;width:${pct}%;background:${colorBarra(pct)}"></div></div>
+            </td>
+            <td class="text-end">${Q(k.costo)}<div class="hc-ayuda">${Q(k.costo_kg)}/kg</div></td>
+            <td class="text-end fw-bold">${k.agotado ? '—' : Q(k.valor)}</td>
+            <td><span class="hc-chip">${k.origen === 'inicial' ? 'Ya lo tenía' : fecha(k.fecha)}</span></td>
+            <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-dark" data-peso-carrete="${k.id}" title="Corregir cuánto le queda"><i class="bi bi-speedometer2"></i></button>
+                <button class="btn btn-sm btn-outline-dark" data-color-carrete="${k.id}" title="Cambiar el color"><i class="bi bi-palette"></i></button>
+            </td>
+        </tr>`;
+    }).join('');
+    return `<h3 class="h6 mt-3 mb-2"><i class="bi bi-disc me-1"></i>Carretes <span class="hc-ayuda fw-normal">${vivos.length} con filamento · ${gr(gramos)} · ${Q(valor)}</span></h3>
+        <div class="table-responsive"><table class="table table-sm align-middle mb-0 hc-tabla-nw">
+            <thead><tr><th>Color</th><th>Material</th><th>Le queda</th><th class="text-end">Costo nuevo</th><th class="text-end">Valor ahora</th><th>Entrada</th><th></th></tr></thead>
+            <tbody>${filas}</tbody></table></div>
+        <div class="hc-ayuda mt-1">Los gramos bajan solos cuando un pedido pasa a <b>Imprimiendo</b> (con la merma) y cuando registras una impresión fallida en Pedidos. Si lo que marca la báscula es distinto, corrígelo con el medidor.</div>`;
+}
+
+// Avisos de poco filamento por color, gramos por color y merma presupuestada contra real
+function bloqueAvisos(d) {
+    if (!d.carretes_ok) return '';
+    const limite = num(d.alerta_g);
+    const chips = (d.colores || []).length
+        ? `<div class="mt-3"><div class="hc-ayuda mb-1">Filamento por color <span class="fw-normal">(aviso debajo de ${gr(limite)})</span></div>
+            ${(d.colores || []).map((c) => {
+                const poco = num(c.gramos) < limite;
+                return `<span class="hc-chip me-1 mb-1" style="${poco ? 'background:#fde8ee;color:#b0224f' : ''}">${puntoColor(c.color)}${esc(c.color)} <span class="hc-ayuda">${esc(c.material)}</span> <b>${gr(c.gramos)}</b>${c.carretes > 1 ? ` · ${c.carretes} carretes` : ''}</span>`;
+            }).join('')}</div>`
+        : '';
+
+    const av = d.por_acabarse || [];
+    const alertas = av.length
+        ? `<div class="mt-3 p-2 rounded" style="background:#fff4f6;border:1px solid #f1b5c4;border-left:5px solid #d6336c">
+            <div class="fw-bold mb-1" style="color:#b0224f"><i class="bi bi-exclamation-triangle-fill me-1"></i>Filamento por reponer</div>
+            ${av.map((a) => `<div class="small">${a.agotado
+                ? `<b>${esc(a.color)}</b> (${esc(a.material)}): <b>se acabó</b>${a.pedidos?.length ? ` y lo necesita ${a.pedidos.map(esc).join(', ')}` : ''}`
+                : `<b>${esc(a.color)}</b> (${esc(a.material)}): quedan <b>${gr(a.gramos)}</b>${a.pedidos?.length ? ` · lo espera ${a.pedidos.map(esc).join(', ')}` : ''}`}</div>`).join('')}
+           </div>`
+        : '';
+
+    const m = d.merma || {};
+    let merma = '';
+    if (d.paso2_ok && (num(m.presupuestada_g) > 0 || num(m.real_g) > 0)) {
+        const pierdesMas = num(m.real_g) > num(m.presupuestada_g);
+        merma = `<div class="mt-3 p-2 rounded" style="background:${pierdesMas ? '#fff4f6' : '#eefaf2'};border:1px solid ${pierdesMas ? '#f1b5c4' : '#b9e3c8'}">
+            <div class="fw-bold mb-1"><i class="bi bi-percent me-1"></i>Merma: lo que cobras contra lo que pierdes</div>
+            <div class="small">Presupuestada en tus cotizaciones: <b>${gr(m.presupuestada_g)}</b> · Perdida en fallas: <b class="${pierdesMas ? 'neg' : ''}">${gr(m.real_g)}</b> (${Q(m.costo_fallas)}) · Este mes: ${gr(m.mes_presupuestada_g)} contra ${gr(m.mes_real_g)}</div>
+            <div class="hc-ayuda">${pierdesMas
+                ? 'Estás perdiendo más filamento del que cobras: la diferencia sale de tu ganancia. Si pasa seguido, sube el porcentaje de merma en Costos y margen.'
+                : 'La merma de tus cotizaciones alcanza para cubrir tus fallas.'}</div>
+        </div>`;
+    }
+    return chips + alertas + merma;
+}
+
+const datalistColores = () => {
+    const usados = (inventario.carretes || []).map((k) => k.color);
+    const todos = [...new Set([...usados, ...COLORES_BASE])];
+    return `<datalist id="dlColores">${todos.map((c) => `<option value="${esc(c)}"></option>`).join('')}</datalist>`;
+};
+
+// Registrar carretes nuevos: comprados (con comprobante) o que ya tenías (con lo que les queda).
+async function formCarretes(inicial) {
+    if (!inventario.carretes_ok) {
+        return Swal.fire({ icon: 'info', title: 'Falta una tabla', text: 'Ejecuta sql/carretes.sql en tu base de datos y recarga la página.', confirmButtonColor: ORO });
+    }
+    const mats = inventario.materiales.filter((m) => num(m.activo) === 1);
+    if (!mats.length) {
+        return Swal.fire({ icon: 'info', title: 'Primero crea un material', text: 'Ve a Catálogos > Materiales.', confirmButtonColor: ORO });
+    }
+
+    const lineaCompra = () => `
+        <div class="ln row g-2 align-items-end mb-2">
+            <div class="col-5"><label class="form-label mb-1">Color</label><input class="form-control ln-color" list="dlColores" maxlength="40" placeholder="Ej. Rojo"></div>
+            <div class="col-3"><label class="form-label mb-1">Cantidad</label><input type="number" min="1" max="50" step="1" class="form-control ln-cant" value="1"></div>
+            <div class="col-3"><label class="form-label mb-1">Peso c/u (g)</label><input type="number" min="100" step="any" class="form-control ln-peso" value="1000"></div>
+            <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger ln-del" title="Quitar"><i class="bi bi-x-lg"></i></button></div>
+        </div>`;
+    const lineaInicial = () => `
+        <div class="ln border rounded p-2 mb-2">
+            <div class="row g-2 mb-1">
+                <div class="col-5"><label class="form-label mb-1">Material</label><select class="form-select ln-mat">${opciones(mats, 'Elige…')}</select></div>
+                <div class="col-4"><label class="form-label mb-1">Color</label><input class="form-control ln-color" list="dlColores" maxlength="40" placeholder="Ej. Negro"></div>
+                <div class="col-2"><label class="form-label mb-1">Cantidad</label><input type="number" min="1" max="50" step="1" class="form-control ln-cant" value="1"></div>
+                <div class="col-1 text-end pt-4"><button type="button" class="btn btn-sm btn-outline-danger ln-del" title="Quitar"><i class="bi bi-x-lg"></i></button></div>
+            </div>
+            <div class="row g-2 align-items-end">
+                <div class="col-3"><label class="form-label mb-1">Precio de uno nuevo (Q)</label><input type="number" min="0" step="any" class="form-control ln-precio"></div>
+                <div class="col-3"><label class="form-label mb-1">Peso original (g)</label><input type="number" min="100" step="any" class="form-control ln-peso" value="1000"></div>
+                <div class="col-3"><label class="form-label mb-1">En báscula (g)</label><input type="number" min="0" step="any" class="form-control ln-bascula" placeholder="opcional"></div>
+                <div class="col-3"><label class="form-label mb-1">Le queda (g)</label><input type="number" min="0" step="any" class="form-control ln-queda" value="1000"></div>
+            </div>
+        </div>`;
+
+    const { value } = await Swal.fire({
+        titleText: inicial ? 'Filamento que ya tenía' : 'Comprar filamento',
+        width: inicial ? 700 : 560,
+        html: `
+            <div class="text-start">
+                ${datalistColores()}
+                ${inicial ? `<div class="hc-ayuda mb-2">Carretes que <b>ya tenías</b> antes de usar la app. No salen de la caja. Un carrete nuevo ya lleva 1,000 g; si está usado, <b>pésalo con la báscula</b> y la app le resta el carrete vacío.</div>
+                    <div class="row g-2 mb-2 align-items-end">
+                        <div class="col-4"><label class="form-label mb-1">Carrete vacío pesa (g)</label><input id="cVacio" type="number" min="0" step="any" class="form-control" value="250"></div>
+                        <div class="col-8 hc-ayuda">Se usa para calcular lo que le queda: báscula − carrete vacío.</div>
+                    </div>` : `
+                    <label class="form-label mb-1">Material</label>
+                    <select id="cMaterial" class="form-select mb-2">${opciones(mats, 'Elige el material…')}</select>`}
+                <div id="lineas">${inicial ? lineaInicial() : lineaCompra()}</div>
+                <button type="button" id="btnOtra" class="btn btn-sm btn-outline-dark mb-2"><i class="bi bi-plus-lg me-1"></i>${inicial ? 'Agregar otro carrete' : 'Agregar otro color'}</button>
+                <div id="cResumen" class="hc-ayuda mb-2"></div>
+                ${inicial ? '' : `
+                    <label class="form-label mb-1">Lo que pagaste en total (Q)</label>
+                    <input id="cCosto" type="number" min="0" step="any" class="form-control mb-2">`}
+                <label class="form-label mb-1">Fecha</label>
+                <input id="cFecha" type="date" class="form-control mb-2" max="${hoy()}" value="${hoy()}">
+                ${inicial ? '' : `
+                    <label class="form-label mb-1">Pagado con</label>
+                    ${radioOrigen('caja', 'cOrigen')}
+                    <div id="cAvisoCaja" class="hc-ayuda mb-2"></div>
+                    <label class="form-label mb-1">Proveedor o nota (opcional)</label><input id="cNota" class="form-control mb-2" placeholder="Ej. Tienda 3D Cobán">
+                    <label class="form-label mb-1">Comprobante (obligatorio)</label>
+                    <input id="cArchivo" type="file" accept="image/*,application/pdf" class="form-control mb-2">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="cActualizar">
+                        <label class="form-check-label" for="cActualizar">Actualizar el costo por kg del material con esta compra (afecta las cotizaciones nuevas)</label></div>`}
+            </div>`,
+        didOpen: (pop) => {
+            const cont = pop.querySelector('#lineas');
+            const vacio = () => num(pop.querySelector('#cVacio')?.value);
+            const refrescar = () => {
+                let carretes = 0;
+                let g = 0;
+                let valor = 0;
+                cont.querySelectorAll('.ln').forEach((ln) => {
+                    const cant = Math.max(parseInt(ln.querySelector('.ln-cant').value, 10) || 0, 0);
+                    const peso = num(ln.querySelector('.ln-peso').value);
+                    carretes += cant;
+                    if (inicial) {
+                        const queda = num(ln.querySelector('.ln-queda').value);
+                        g += cant * queda;
+                        valor += peso > 0 ? cant * num(ln.querySelector('.ln-precio').value) * (queda / peso) : 0;
+                    } else {
+                        g += cant * peso;
+                    }
+                });
+                const costo = num(pop.querySelector('#cCosto')?.value);
+                pop.querySelector('#cResumen').innerHTML = carretes
+                    ? `<b>${carretes}</b> carrete${carretes === 1 ? '' : 's'} · <b>${(g / 1000).toLocaleString('es-GT', { minimumFractionDigits: 3 })} kg</b>${inicial ? ` · valen <b>${Q(valor)}</b> con lo que les queda` : costo > 0 && g > 0 ? ` · sale a <b>${Q((costo / g) * 1000)} por kg</b>` : ''}`
+                    : '';
+                const aviso = pop.querySelector('#cAvisoCaja');
+                if (aviso) {
+                    const origen = pop.querySelector('input[name="cOrigen"]:checked').value;
+                    const libre = cajaActual ? num(cajaActual.disponible) : null;
+                    aviso.innerHTML = origen === 'caja' && libre !== null
+                        ? `Disponible para gastar: <b style="color:${costo > libre + 0.005 ? '#b42318' : '#117a43'}">${Q(libre)}</b>${costo > libre + 0.005 ? ' · no alcanza: elige “De mi bolsillo”' : ''}`
+                        : 'Se registra como dinero que pones en el negocio y luego se gasta: la caja queda igual.';
+                }
+            };
+            pop.addEventListener('input', (e) => {
+                // La báscula calcula lo que le queda: báscula − carrete vacío
+                if (inicial && e.target.classList.contains('ln-bascula')) {
+                    const ln = e.target.closest('.ln');
+                    const b = parseFloat(e.target.value);
+                    if (b > 0) ln.querySelector('.ln-queda').value = Math.max(Math.round((b - vacio()) * 10) / 10, 0);
+                }
+                // Si cambian el peso original y no han tocado "le queda", se mantiene igual al original
+                if (inicial && e.target.classList.contains('ln-peso')) {
+                    const ln = e.target.closest('.ln');
+                    if (!ln.querySelector('.ln-bascula').value) ln.querySelector('.ln-queda').value = e.target.value;
+                }
+                refrescar();
+            });
+            pop.addEventListener('change', refrescar);
+            pop.addEventListener('click', (e) => {
+                if (e.target.closest('#btnOtra')) {
+                    cont.insertAdjacentHTML('beforeend', inicial ? lineaInicial() : lineaCompra());
+                    refrescar();
+                }
+                const del = e.target.closest('.ln-del');
+                if (del && cont.querySelectorAll('.ln').length > 1) {
+                    del.closest('.ln').remove();
+                    refrescar();
+                }
+            });
+            refrescar();
+        },
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: ORO,
+        preConfirm: () => {
+            const p = Swal.getPopup();
+            const invalido = (m) => {
+                Swal.showValidationMessage(m);
+                return false;
+            };
+            const lineas = [];
+            for (const ln of p.querySelectorAll('.ln')) {
+                const color = ln.querySelector('.ln-color').value.trim();
+                const cantidad = parseInt(ln.querySelector('.ln-cant').value, 10);
+                const peso = parseFloat(ln.querySelector('.ln-peso').value);
+                if (inicial && !ln.querySelector('.ln-mat').value) return invalido('Elige el material de cada carrete');
+                if (!color) return invalido('Escribe el color de cada carrete');
+                if (!(cantidad >= 1)) return invalido(`Cantidad de ${color}: mínimo 1`);
+                if (!(peso >= 100)) return invalido(`Peso de ${color}: escribe los gramos (normalmente 1000)`);
+                if (inicial) {
+                    const queda = parseFloat(ln.querySelector('.ln-queda').value);
+                    const precio = parseFloat(ln.querySelector('.ln-precio').value);
+                    if (!(queda > 0) || queda > peso) return invalido(`Cuánto le queda a ${color}: más de 0 y no más de ${peso} g`);
+                    if (!(precio > 0)) return invalido(`Escribe cuánto cuesta uno nuevo de ${color} (aunque sea aproximado)`);
+                    lineas.push({ material_id: ln.querySelector('.ln-mat').value, color, cantidad, peso_g: peso, gramos: queda, precio });
+                } else {
+                    lineas.push({ color, cantidad, peso_g: peso });
+                }
+            }
+            const fechaC = p.querySelector('#cFecha').value;
+            if (!inicial && !p.querySelector('#cMaterial').value) return invalido('Elige el material');
+            if (!fechaC || fechaC > hoy()) return invalido('La fecha no puede ser futura');
+            if (inicial) {
+                return { origen: 'inicial', fecha: fechaC, carretes: JSON.stringify(lineas) };
+            }
+            const costo = parseFloat(p.querySelector('#cCosto').value);
+            const archivo = p.querySelector('#cArchivo').files[0] || null;
+            if (!(costo > 0)) return invalido('Escribe cuánto pagaste en total');
+            if (!archivo) return invalido('La compra de filamento lleva comprobante');
+            if (archivo.size > 5 * 1024 * 1024) return invalido('El comprobante pesa más de 5 MB');
+            return {
+                material_id: p.querySelector('#cMaterial').value,
+                costo_total: costo,
+                fecha: fechaC,
+                origen: p.querySelector('input[name="cOrigen"]:checked').value,
+                nota: p.querySelector('#cNota').value.trim(),
+                actualizar_costo: p.querySelector('#cActualizar').checked ? 1 : 0,
+                carretes: JSON.stringify(lineas),
+                comprobante: archivo,
+            };
+        },
+    });
+    if (!value) return;
+
+    const r = await post('inventario/comprar', value);
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    cargar();
+}
+
+// Corregir cuánto le queda a un carrete (queda guardado el antes, el después y el motivo)
+async function ajustarPeso(k) {
+    const { value } = await Swal.fire({
+        titleText: `${k.color} · ${k.material}`,
+        html: `
+            <div class="text-start">
+                <div class="hc-ayuda mb-2">Hoy tiene registrado <b>${gr(k.gramos_actuales)}</b> de ${gr(k.peso_inicial_g)}. Pésalo con la báscula y corrige.</div>
+                <div class="row g-2 mb-2 align-items-end">
+                    <div class="col-4"><label class="form-label mb-1">Báscula (g)</label><input id="aBascula" type="number" min="0" step="any" class="form-control" placeholder="opcional"></div>
+                    <div class="col-4"><label class="form-label mb-1">Carrete vacío (g)</label><input id="aVacio" type="number" min="0" step="any" class="form-control" value="250"></div>
+                    <div class="col-4"><label class="form-label mb-1">Le queda (g)</label><input id="aGramos" type="number" min="0" step="any" class="form-control" value="${num(k.gramos_actuales)}"></div>
+                </div>
+                <label class="form-label mb-1">Motivo</label>
+                <input id="aMotivo" class="form-control" maxlength="250" value="Pesado en báscula">
+                <div class="hc-ayuda mt-1">Para dar de baja un carrete (se rompió, se perdió), pon 0 y escribe el motivo.</div>
+            </div>`,
+        didOpen: (pop) => {
+            pop.addEventListener('input', (e) => {
+                if (e.target.id === 'aBascula' || e.target.id === 'aVacio') {
+                    const b = parseFloat(pop.querySelector('#aBascula').value);
+                    if (b > 0) pop.querySelector('#aGramos').value = Math.max(Math.round((b - num(pop.querySelector('#aVacio').value)) * 10) / 10, 0);
+                }
+            });
+        },
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: ORO,
+        preConfirm: () => {
+            const p = Swal.getPopup();
+            const gramos = parseFloat(p.querySelector('#aGramos').value);
+            const motivo = p.querySelector('#aMotivo').value.trim();
+            if (!(gramos >= 0)) { Swal.showValidationMessage('Escribe cuánto le queda'); return false; }
+            if (gramos > num(k.peso_inicial_g)) { Swal.showValidationMessage(`No puede tener más de ${gr(k.peso_inicial_g)}`); return false; }
+            if (motivo.length < 3) { Swal.showValidationMessage('Escribe el motivo'); return false; }
+            return { id: k.id, gramos, motivo };
+        },
+    });
+    if (!value) return;
+    const r = await post('inventario/carrete-peso', value);
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    cargar();
+}
+
+async function cambiarColor(k) {
+    const { value } = await Swal.fire({
+        titleText: 'Cambiar el color',
+        html: `${datalistColores()}<input id="kColor" class="form-control" list="dlColores" maxlength="40" value="${esc(k.color)}">`,
+        showCancelButton: true,
+        confirmButtonText: 'Guardar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: ORO,
+        preConfirm: () => {
+            const c = Swal.getPopup().querySelector('#kColor').value.trim();
+            if (!c) { Swal.showValidationMessage('Escribe el color'); return false; }
+            return c;
+        },
+    });
+    if (!value) return;
+    const r = await post('inventario/carrete-color', { id: k.id, color: value });
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    cargar();
+}
+
 // Compra de filamento (o inventario inicial). Con `c` edita una compra ya registrada.
 async function formCompra(c = null, inicial = false) {
+    if (!c) return formCarretes(inicial);
+    const conCarretes = (inventario.carretes || []).some((k) => String(k.compra_id) === String(c.id));
     const editar = Boolean(c);
     const esInicial = editar ? c.origen === 'inicial' : inicial;
     const mats = inventario.materiales.filter((m) => num(m.activo) === 1 || (editar && String(m.id) === String(c.material_id)));
@@ -629,10 +1111,11 @@ async function formCompra(c = null, inicial = false) {
             <div class="text-start">
                 ${esInicial ? '<div class="hc-ayuda mb-2">Filamento que <b>ya tenías</b> antes de usar la app. No sale de la caja: solo suma kg y valor al inventario.</div>' : ''}
                 <label class="form-label mb-1">Material</label>
-                <select id="cMaterial" class="form-select mb-2">${opciones(mats, null, c?.material_id ?? null)}</select>
+                <select id="cMaterial" class="form-select mb-2" ${conCarretes ? 'disabled' : ''}>${opciones(mats, null, c?.material_id ?? null)}</select>
+                ${conCarretes ? '<div class="hc-ayuda mb-2">Esta compra tiene carretes registrados: el material y los kg no se cambian aquí. Para corregir cuánto le queda a un carrete usa el botón del medidor en la tabla de carretes.</div>' : ''}
                 <div class="row g-2 mb-1">
                     <div class="col-6"><label class="form-label mb-1">Cantidad (kg)</label>
-                        <input id="cKg" type="number" min="0" step="0.001" class="form-control" placeholder="Ej. 1" value="${c ? num(c.kg) : ''}"></div>
+                        <input id="cKg" type="number" min="0" step="0.001" class="form-control" placeholder="Ej. 1" value="${c ? num(c.kg) : ''}" ${conCarretes ? 'readonly' : ''}></div>
                     <div class="col-6"><label class="form-label mb-1">${esInicial ? 'Lo que vale (Q)' : 'Lo que pagaste en total (Q)'}</label>
                         <input id="cCosto" type="number" min="0" step="any" class="form-control" value="${c ? num(c.costo_total) : ''}"></div>
                 </div>
@@ -718,6 +1201,10 @@ $('btnInicial').addEventListener('click', () => formCompra(null, true));
 $('inventario').addEventListener('click', (e) => {
     const ed = e.target.closest('[data-editar-compra]');
     const hist = e.target.closest('[data-hist-compra]');
+    const peso = e.target.closest('[data-peso-carrete]');
+    const col = e.target.closest('[data-color-carrete]');
+    if (peso) ajustarPeso(inventario.carretes.find((k) => String(k.id) === peso.dataset.pesoCarrete));
+    if (col) cambiarColor(inventario.carretes.find((k) => String(k.id) === col.dataset.colorCarrete));
     if (ed) formCompra(inventario.compras.find((c) => String(c.id) === ed.dataset.editarCompra));
     if (hist) verHistorial('compra', hist.dataset.histCompra);
 });

@@ -3,6 +3,7 @@
 namespace Controllers;
 
 use MVC\Router;
+use Model\Cierre;
 use Model\Reporte;
 
 class DashboardController
@@ -20,6 +21,11 @@ class DashboardController
         getHeadersApi();
 
         $mes = self::mesValido($_GET['mes'] ?? '') ?: date('Y-m');
+        $porMes = Reporte::resultadosPorMes();
+        $cierres = [];
+        foreach ($porMes as $m) {
+            $cierres[$m['mes']] = Cierre::estadoMes((string) $m['mes']);
+        }
 
         self::responder(1, '', ['datos' => [
             'mes'        => $mes,
@@ -27,7 +33,10 @@ class DashboardController
             'balance'    => Reporte::balanceAl($mes),
             'produccion' => Reporte::enProduccion(),
             'caja'       => Reporte::caja(),
-            'por_mes'    => Reporte::resultadosPorMes(),
+            'por_mes'    => $porMes,
+            'cierre'     => Cierre::estadoMes($mes),
+            'cierres'    => (object) $cierres,
+            'cierre_hasta' => Cierre::ultimaFecha(),
             'flujo'      => Reporte::flujoCajaMensual()
         ]]);
     }

@@ -16,6 +16,7 @@ use Controllers\VentasController;
 use Controllers\CajaController;
 use Controllers\EmpaquesController;
 use Controllers\InventarioController;
+use Controllers\CierresController;
 
 $router = new Router();
 $router->setBaseURL('/' . $_ENV['APP_NAME']);
@@ -104,8 +105,6 @@ $router->post('/API/configuracion/reserva',  [ConfiguracionController::class, 'g
 $router->get('/API/caja/resumen',   [CajaController::class, 'resumenAPI']);
 $router->post('/API/caja/crear',    [CajaController::class, 'crearAPI']);
 $router->post('/API/caja/eliminar', [CajaController::class, 'eliminarAPI']);
-$router->get('/API/caja/conciliacion',  [CajaController::class, 'conciliacionAPI']);
-$router->post('/API/caja/conciliar',    [CajaController::class, 'conciliarAPI']);
 
 
 $router->post('/API/ventas/pago/actualizar', [VentasController::class, 'actualizarPagoAPI']);
@@ -125,8 +124,24 @@ $router->get('/API/inventario/resumen',     [InventarioController::class, 'resum
 $router->post('/API/inventario/comprar',    [InventarioController::class, 'comprarAPI']);
 $router->post('/API/inventario/actualizar', [InventarioController::class, 'actualizarAPI']);
 $router->get('/API/gastos/historial',       [GastosController::class, 'historialAPI']);
+$router->post('/API/inventario/carrete-peso',  [InventarioController::class, 'carretePesoAPI']);
+$router->post('/API/inventario/carrete-color', [InventarioController::class, 'carreteColorAPI']);
+
+$router->post('/API/inventario/carrete-peso',  [InventarioController::class, 'carretePesoAPI']);
+$router->post('/API/inventario/carrete-color', [InventarioController::class, 'carreteColorAPI']);
+
+// ---- Carretes · paso 2 (InventarioController y PedidosController ya están importados) ----
+$router->get('/API/inventario/colores',   [InventarioController::class, 'coloresAPI']);
+$router->get('/API/inventario/alertas',   [InventarioController::class, 'alertasAPI']);
+$router->get('/API/pedidos/carretes',     [PedidosController::class, 'carretesAPI']);
+$router->post('/API/pedidos/falla',       [PedidosController::class, 'fallaAPI']);
 
 
+// ---- Cierre de período (reemplaza a "Conciliar con el banco") ----
+// Agrega arriba:  use Controllers\CierresController;
+$router->get('/API/cierres/preparar',   [CierresController::class, 'prepararAPI']);
+$router->post('/API/cierres/cerrar',    [CierresController::class, 'cerrarAPI']);
+$router->post('/API/cierres/reabrir',   [CierresController::class, 'reabrirAPI']);
+$router->get('/API/cierres/evidencia',  [CierresController::class, 'evidenciaAPI']);
 
-// Comprueba y valida las rutas, que existan y les asigna las funciones del Controlador
 $router->comprobarRutas();

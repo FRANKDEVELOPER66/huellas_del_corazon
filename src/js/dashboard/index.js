@@ -1,11 +1,22 @@
 import { $, esc, num, Q, Q0, crearApi, error, mesActual, fecha, signo, etiquetaMes } from '../comun.js';
 
-
 const { get } = crearApi($('appBalance').dataset.base || '');
 
 const pct = (n, d) => (d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—');
 const vacio = (cols, texto) => `<tr><td colspan="${cols}" class="text-center text-muted py-3">${texto}</td></tr>`;
 const mayus = (s) => s.replace(/^./, (c) => c.toUpperCase());
+
+// Sello del cierre de un mes: conciliado con el banco, cerrado con diferencia, cerrado a medias o abierto
+function sello(c, corto = false) {
+    if (!c || c.estado === 'abierto') return `<span class="sello sello-abierto"><i class="bi bi-unlock"></i> Abierto</span>`;
+    const hasta = fecha(c.hasta);
+    if (c.estado === 'parcial') {
+        return `<span class="sello ${c.conciliado ? 'sello-ok' : 'sello-mal'}" title="Cerrado y conciliado hasta el ${hasta}"><i class="bi bi-lock-fill"></i> Cerrado hasta ${hasta}</span>`;
+    }
+    return c.conciliado
+        ? `<span class="sello sello-ok" title="Cerrado: la caja cuadró con el banco"><i class="bi bi-patch-check-fill"></i> Conciliado${corto ? '' : ' con el banco'}</span>`
+        : `<span class="sello sello-mal" title="Cerrado, pero quedaron ${Q(c.sin_explicar)} sin explicar"><i class="bi bi-exclamation-triangle-fill"></i> Cerrado con ${Q(Math.abs(c.sin_explicar))} sin explicar</span>`;
+}
 
 // Una fila coloreada del estado de resultados
 const fila = (color, titulo, explicacion, monto, extra = '') => `
@@ -21,15 +32,15 @@ async function cargar() {
     if (r.codigo !== 1) return error(r);
 
     const d = r.datos;
-    $('tituloMes').textContent = mayus(etiquetaMes(mes));
+    $('tituloMes').innerHTML = `${esc(mayus(etiquetaMes(mes)))} ${sello(d.cierre)}`;
     kpis(d.resultados);
     resultados(d.resultados, d.caja);
     apilada(d.resultados);
     material(d.resultados, d.balance);
     produccion(d.produccion);
     piezas(d.resultados);
-    balance(d.balance, mes);
-    meses(d.por_mes);
+    balance(d.balance, mes, d.cierre);
+    meses(d.por_mes, d.cierres || {});
     flujo(d.flujo);
 }
 
@@ -71,11 +82,11 @@ function resultados(e, caja) {
         ${fila('verde', `= UTILIDAD NETA · ${pct(e.utilidad_neta, e.ventas)}`, 'Tu ganancia final del mes', Q(e.utilidad_neta), 'est-total mt-2')}
 
         ${fila(caja.disponible < 0 ? 'rojo' : 'ambar', 'CAJA DISPONIBLE HOY', 'Es el dinero con el que compras filamento y pagas lo pendiente. No es lo mismo que la utilidad: viene de lo cobrado, lo que aportas y lo que ya pagaste.', Q(caja.disponible), 'est-total mt-4')}
-        ${sub('Caja (cobrado + aportes − retiros − pagado)', Q(caja.caja))}
+        ${sub('Caja (cobrado + aportes − retiros − devoluciones − pagado)', Q(caja.caja))}
         ${sub('(−) Por pagar a la pintora, envíos y otros (pago sin registrar)', Q(caja.por_pagar))}
         ${sub('De lo disponible: ganancia que ya puedes retirar', Q(caja.ganancia_retirable))}
         ${sub('De lo disponible: reserva para repuestos y equipo', Q(caja.reserva))}
-        ${sub('De lo disponible: para reponer material y fabricar (no es ganancia)', Q(caja.para_reponer))}`;
+        ${sub('De lo disponible: para reponer material y capital tuyo (no es ganancia)', Q(caja.para_reponer))}`;
 }
 
 // ── Barra: de cada Q100 que vendes ──────────────────────────────────────────
@@ -139,13 +150,13 @@ function piezas(e) {
 }
 
 // ── Balance ─────────────────────────────────────────────────────────────────
-function balance(b, mes) {
+function balance(b, mes, cierre) {
     $('balance').innerHTML = `
-        <p class="hc-ayuda">Foto del negocio al ${fecha(b.al)}: lo que tienes, lo que debes y lo que realmente vale.</p>
+        <p class="hc-ayuda">Foto del negocio al ${fecha(b.al)}: lo que tienes, lo que debes y lo que realmente vale. ${sello(cierre)}</p>
         <div class="row g-3">
             <div class="col-lg-4">
                 <h6 class="text-uppercase" style="color:#117a43">Lo que tienes</h6>
-                ${fila(b.efectivo < 0 ? 'rojo' : 'verde', 'Efectivo', `Cobrado ${Q(b.cobros)} + aportes ${Q(b.aportes)} − retiros ${Q(b.retiros)} − pagado ${Q(b.pagos)}`, Q(b.efectivo))}
+                ${fila(b.efectivo < 0 ? 'rojo' : 'verde', 'Efectivo', `Cobrado ${Q(b.cobros)} + aportes ${Q(b.aportes)} − retiros ${Q(b.retiros)}${num(b.devoluciones) ? ` − capital devuelto ${Q(b.devoluciones)}` : ''} − pagado ${Q(b.pagos)}`, Q(b.efectivo))}
                 ${fila('verde', 'Por cobrar', 'Ventas entregadas que aún no te pagan completas', Q(b.por_cobrar))}
                 ${fila(b.inventario < 0 ? 'rojo' : 'ambar', 'Inventario de filamento', `Comprado ${Q(b.compras_inv)} − usado ${Q(b.material_usado)}${b.inventario < 0 ? ' · registra tus compras de filamento en Gastos' : ''}`, Q(b.inventario))}
                 ${fila('ambar', 'Producción en proceso', 'Material y pagos a la pintora de piezas sin entregar', Q(b.en_proceso))}
@@ -166,7 +177,7 @@ function balance(b, mes) {
 }
 
 // ── Histórico ───────────────────────────────────────────────────────────────
-function meses(lista) {
+function meses(lista, cierres = {}) {
     document.querySelector('#tablaMeses tbody').innerHTML = lista.length
         ? lista.map((m) => `
             <tr role="button" data-mes="${m.mes}">
@@ -176,8 +187,9 @@ function meses(lista) {
                 <td class="text-end" style="color:#6b3fa0">${Q(m.operativos)}</td>
                 <td class="text-end fw-bold ${signo(m.neta)}">${Q(m.neta)}</td>
                 <td class="text-end">${m.margen === null ? '—' : `${num(m.margen)}%`}</td>
+                <td class="text-end">${sello(cierres[m.mes], true)}</td>
             </tr>`).join('')
-        : vacio(6, 'Aún no hay ventas entregadas.');
+        : vacio(7, 'Aún no hay ventas entregadas.');
 }
 
 function flujo(lista) {

@@ -25,4 +25,15 @@ trait RespuestaApi
     {
         return preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) $mes) ? (string) $mes : '';
     }
+
+    // Corta con un error si alguna fecha cae en un período cerrado (ver Model\Cierre). Acepta varias fechas.
+    protected static function exigirAbierta(?string ...$fechas): void
+    {
+        foreach ($fechas as $f) {
+            $mensaje = $f ? \Model\Cierre::bloqueo($f) : null;
+            if ($mensaje) {
+                self::responder(0, $mensaje);
+            }
+        }
+    }
 }

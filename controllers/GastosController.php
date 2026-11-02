@@ -69,6 +69,7 @@ class GastosController
 
         self::errores($gasto->validar());
         self::fechaNoFutura($gasto->fecha);
+        self::exigirAbierta($gasto->fecha);
 
         $cat = CategoriaGasto::find((int)$gasto->categoria_id);
         if (!$cat) {
@@ -183,6 +184,7 @@ class GastosController
 
         self::errores($gasto->validar());
         self::fechaNoFutura($gasto->fecha);
+        self::exigirAbierta($antes['fecha'], $gasto->fecha);
 
         $cat = CategoriaGasto::find((int)$gasto->categoria_id);
         if (!$cat) {

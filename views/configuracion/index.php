@@ -32,7 +32,22 @@ include __DIR__ . '/../partials/hc-estilos.php';
                     <input type="number" step="any" min="0" id="reservaMeta" class="form-control">
                     <button class="btn btn-hc" id="btnReserva"><i class="bi bi-save me-1"></i>Guardar meta</button>
                 </div>
+                <label class="form-label mb-1 mt-3" for="capitalMultiplo">Devolver capital cuando el negocio valga (veces tu inversión)</label>
+                <input type="number" step="any" min="1" id="capitalMultiplo" class="form-control mb-1">
+                <div class="hc-ayuda mb-2">Con 3, el botón “Devolver capital” se activa cuando el patrimonio del negocio sea 3 veces lo que has puesto. Se guarda con el mismo botón.</div>
                 <div id="reservaEstado" class="hc-ayuda"></div>
+            </div>
+        </div>
+
+        <div class="col-lg-8 col-xl-6 mt-3">
+            <div class="hc-card" style="border-left:5px solid #d6336c">
+                <h2 class="h5 mb-1"><i class="bi bi-exclamation-triangle-fill me-2" style="color:#d6336c"></i>Aviso de poco filamento</h2>
+                <div class="hc-ayuda mb-3">Cuando a un color le queden menos gramos que esto (sumando todos sus carretes), la app te avisa al mandar a imprimir y lo muestra en Pedidos y en el inventario.</div>
+                <label class="form-label mb-1" for="alertaG">Avisar cuando queden menos de (gramos)</label>
+                <div class="input-group">
+                    <input type="number" step="1" min="0" id="alertaG" class="form-control">
+                    <button class="btn btn-hc" id="btnAlerta"><i class="bi bi-save me-1"></i>Guardar aviso</button>
+                </div>
             </div>
         </div>
     </div>

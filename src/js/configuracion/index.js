@@ -1,6 +1,5 @@
 import { $, num, toast, crearApi, error, fecha, Q } from '../comun.js';
 
-
 const { get, post } = crearApi($('appConfig').dataset.base || '');
 
 const CAMPOS = [
@@ -43,14 +42,24 @@ async function cargarReserva() {
     const r = await get('configuracion/reserva');
     if (r.codigo !== 1) return;
     $('reservaMeta').value = num(r.datos.meta);
+    $('capitalMultiplo').value = num(r.datos.multiplo);
+    $('alertaG').value = num(r.datos.alerta_g);
     const c = r.datos.caja;
     $('reservaEstado').innerHTML = `Hoy la reserva tiene <b>${Q(c.reserva)}</b> de <b>${Q(c.reserva_meta)}</b>. Ganancia que puedes retirar: <b>${Q(c.ganancia_retirable)}</b>.`;
 }
 
 $('btnReserva').addEventListener('click', async () => {
-    const r = await post('configuracion/reserva', { meta: $('reservaMeta').value });
+    const r = await post('configuracion/reserva', { meta: $('reservaMeta').value, multiplo: $('capitalMultiplo').value });
     if (r.codigo !== 1) return error(r);
     toast.fire({ icon: 'success', title: r.mensaje });
+    cargarReserva();
+});
+
+$('btnAlerta').addEventListener('click', async () => {
+    // El servidor pide también la meta de la reserva: se manda la que está guardada
+    const r = await post('configuracion/reserva', { meta: $('reservaMeta').value, alerta_g: $('alertaG').value });
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: 'Aviso guardado' });
     cargarReserva();
 });
 

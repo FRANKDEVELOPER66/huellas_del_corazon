@@ -99,6 +99,7 @@ class VentasController
         ]);
 
         self::errores($venta->validar());
+        self::exigirAbierta($venta->fecha_venta);
 
         $anticipo = (float)($_POST['anticipo'] ?? 0);
         if ($anticipo < 0 || $anticipo > (float)$venta->precio_venta) {
@@ -151,6 +152,20 @@ class VentasController
         self::responder(1, 'Venta registrada correctamente', ['id' => $ventaId, 'estado_pedido' => $estadoPedido]);
     }
 
+    // Fecha en que la venta cuenta en los resultados: la de entrega (o la de venta si es una venta antigua sin pedido).
+    // Una venta cuyo pedido todavía no se entrega no afecta ningún período: devuelve null.
+    private static function fechaContable(int $ventaId): ?string
+    {
+        $r = ActiveRecord::fetchArray(
+            "SELECT CASE WHEN v.pedido_id IS NULL THEN v.fecha_venta
+                         WHEN p.estado = 'entregado' THEN COALESCE(p.entregado_en, v.fecha_venta)
+                         ELSE NULL END AS f
+             FROM ventas v LEFT JOIN pedidos p ON p.id = v.pedido_id WHERE v.id = ?",
+            [$ventaId]
+        );
+        return !empty($r[0]['f']) ? (string)$r[0]['f'] : null;
+    }
+
     public static function actualizarAPI(Router $router): void
     {
         getHeadersApi();
@@ -160,6 +175,10 @@ class VentasController
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
+
+        // Una venta ya entregada en un período cerrado no se toca
+        self::exigirAbierta(self::fechaContable((int)$venta->id));
+        $fechaVentaAntes = (string)$venta->fecha_venta;
 
         if (array_key_exists('descripcion', $_POST)) {
             $venta->descripcion = trim($_POST['descripcion']);
@@ -175,6 +194,9 @@ class VentasController
         }
 
         self::errores($venta->validar());
+        if ((string)$venta->fecha_venta !== $fechaVentaAntes) {
+            self::exigirAbierta($fechaVentaAntes, (string)$venta->fecha_venta);
+        }
 
         // exec() devuelve 0 si no cambió nada: eso no es un error
         $resultado = $venta->actualizar();
@@ -201,6 +223,7 @@ class VentasController
         ]);
 
         self::errores($pago->validar());
+        self::exigirAbierta($pago->fecha);
 
         $saldo = $venta->saldo();
         if ($pago->monto > $saldo + 0.005) {
@@ -256,6 +279,7 @@ class VentasController
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
+        self::exigirAbierta((string)$pago->fecha);
 
         // Si la venta ya está entregada (y pagada completa), el monto queda fijo; fecha y comprobante sí se pueden corregir
         $entregada = ActiveRecord::fetchArray(
@@ -274,6 +298,7 @@ class VentasController
             $pago->notas = trim($_POST['notas']) ?: null;
         }
         self::errores($pago->validar());
+        self::exigirAbierta($pago->fecha);
 
         // Lo cobrado no puede pasar del precio de la venta
         $otros = ActiveRecord::fetchArray('SELECT COALESCE(SUM(monto), 0) AS total FROM pagos WHERE venta_id = ? AND id <> ?', [(int)$venta->id, (int)$pago->id]);
@@ -308,6 +333,7 @@ class VentasController
         if (!$pago) {
             self::responder(0, 'Pago no encontrado');
         }
+        self::exigirAbierta((string)$pago->fecha);
 
         $pago->eliminar();
         self::borrarComprobante($pago->comprobante);
@@ -323,6 +349,16 @@ class VentasController
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
+
+        // Si algo de esta venta (cobros, gastos, entrega) está en un período cerrado, no se puede borrar
+        $fechas = ActiveRecord::fetchArray(
+            'SELECT fecha FROM pagos WHERE venta_id = ? UNION SELECT fecha FROM gastos WHERE venta_id = ?',
+            [(int)$venta->id, (int)$venta->id]
+        );
+        self::exigirAbierta(...array_merge(
+            array_column($fechas, 'fecha'),
+            [(string)$venta->fecha_venta, self::fechaContable((int)$venta->id)]
+        ));
 
         $archivos = ActiveRecord::fetchArray('SELECT comprobante FROM pagos WHERE venta_id = ? AND comprobante IS NOT NULL', [(int)$venta->id]);
         $venta->eliminar();

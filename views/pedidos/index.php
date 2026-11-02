@@ -59,6 +59,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
 </div>
 
 <div id="appPedidos" data-base="<?= $base ?>">
+    <div id="alertasFil"></div>
     <div class="tablero" id="tablero"></div>
     <p class="hc-ayuda mt-2">Cada venta crea su pedido en Solicitado. Avanza con el botón y confirma: no se puede regresar. Al final, “Finalizar venta” verifica que esté pagado completo y deja el pedido en Entregado, que ya no cambia.</p>
 </div>

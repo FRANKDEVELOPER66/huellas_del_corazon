@@ -6,20 +6,27 @@ class CotizacionParte extends ModeloBase
 {
     protected static $tabla = 'cotizacion_partes';
     protected static $idTabla = 'id';
-    protected static $columnasDB = ['id', 'cotizacion_id', 'material_id', 'nombre', 'gramos', 'minutos'];
+    protected static $columnasDB = ['id', 'cotizacion_id', 'material_id', 'color', 'nombre', 'gramos', 'minutos'];
 
     public $id;
     public $cotizacion_id;
     public $material_id;
+    public $color;
     public $nombre;
     public $gramos;
     public $minutos;
 
     public function __construct($args = [])
     {
+        // Si todavía no corriste sql/carretes_paso2.sql, la columna color no existe: se guarda sin ella
+        static::$columnasDB = Inventario::hayColor()
+            ? ['id', 'cotizacion_id', 'material_id', 'color', 'nombre', 'gramos', 'minutos']
+            : ['id', 'cotizacion_id', 'material_id', 'nombre', 'gramos', 'minutos'];
+
         $this->id = $args['id'] ?? null;
         $this->cotizacion_id = $args['cotizacion_id'] ?? null;
         $this->material_id = $args['material_id'] ?? null;
+        $this->color = $args['color'] ?? null;
         $this->nombre = $args['nombre'] ?? '';
         $this->gramos = $args['gramos'] ?? 0;
         $this->minutos = $args['minutos'] ?? 0;

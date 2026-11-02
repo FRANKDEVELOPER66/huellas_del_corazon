@@ -38,6 +38,15 @@ class Reporte
              LEFT JOIN cierres_costo co ON co.venta_id = v.id AND co.concepto = 'otros'";
     }
 
+    // Filamento perdido en impresiones fallidas de cada pieza (por pedido). Se suma al costo de material de esa pieza.
+    // Usa el alias fa (y v, de ventas). Si todavía no existe la tabla de consumos, no suma nada.
+    private static function joinFallas(): string
+    {
+        return Inventario::hayConsumos()
+            ? "LEFT JOIN (SELECT pedido_id, SUM(costo) AS falla FROM carrete_consumos WHERE tipo = 'falla' GROUP BY pedido_id) fa ON fa.pedido_id = v.pedido_id"
+            : "LEFT JOIN (SELECT 0 AS pedido_id, 0 AS falla FROM DUAL WHERE 1 = 0) fa ON fa.pedido_id = v.pedido_id";
+    }
+
     // Una venta con su cuadro: estimado (cotización) contra real. Se arma aquí, no en una vista de MySQL.
     private static function sqlVentas(): string
     {
@@ -50,11 +59,13 @@ class Reporte
                          COALESCE(gp.pintura, 0) + COALESCE(gp.envio, 0) + COALESCE(gp.otros, 0) AS gastos_directos_reales,
                          (" . self::PENDIENTE_DIRECTO . " > 0.005) AS gastos_pendientes,
                          v.ingreso_neto - q.costo_total AS ganancia_estimada,
-                         v.ingreso_neto - (COALESCE(q.costo_material + q.costo_luz + q.costo_desgaste + q.costo_empaque, 0) + " . self::COSTO_DIRECTO . ") AS ganancia_real
+                         COALESCE(fa.falla, 0) AS costo_fallas,
+                         v.ingreso_neto - (COALESCE(q.costo_material + q.costo_luz + q.costo_desgaste + q.costo_empaque, 0) + COALESCE(fa.falla, 0) + " . self::COSTO_DIRECTO . ") AS ganancia_real
                   FROM ventas v
                   JOIN clientes c ON c.id = v.cliente_id
                   LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
                   LEFT JOIN (SELECT venta_id, SUM(monto) AS pagado FROM pagos GROUP BY venta_id) pg ON pg.venta_id = v.id
+                  " . self::joinFallas() . "
                   " . self::joinsCostos() . "
                 ) t";
     }
@@ -114,7 +125,7 @@ class Reporte
     {
         return ActiveRecord::fetchArray(
             "SELECT v.id, v.descripcion, v.ingreso_neto,
-                    COALESCE(q.costo_material, 0)                  AS c_material,
+                    COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) AS c_material,
                     COALESCE(q.costo_luz + q.costo_desgaste, 0)    AS c_maquina,
                     COALESCE(q.costo_empaque, 0)                   AS c_empaque,
                     " . self::COSTO_DIRECTO . "                    AS c_directos,
@@ -123,6 +134,7 @@ class Reporte
              FROM ventas v
              LEFT JOIN pedidos p       ON p.id = v.pedido_id
              LEFT JOIN cotizaciones q  ON q.id = v.cotizacion_id
+             " . self::joinFallas() . "
              " . self::joinsCostos() . "
              WHERE v.pedido_id IS NULL OR p.estado = 'entregado'"
         );
@@ -320,17 +332,19 @@ class Reporte
         ));
 
         $usado = $num(ActiveRecord::fetchArray(
-            'SELECT COALESCE(SUM(q.costo_material), 0) AS total
+            'SELECT COALESCE(SUM(q.costo_material + COALESCE(fa.falla, 0)), 0) AS total
              FROM ventas v JOIN cotizaciones q ON q.id = v.cotizacion_id
+             ' . self::joinFallas() . '
              WHERE v.fecha_venta <= ?',
             [$fin]
         ));
 
         $enProceso = $num(ActiveRecord::fetchArray(
-            "SELECT COALESCE(SUM(COALESCE(q.costo_material, 0) + COALESCE(gd.total, 0)), 0) AS total
+            "SELECT COALESCE(SUM(COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) + COALESCE(gd.total, 0)), 0) AS total
              FROM ventas v
              LEFT JOIN pedidos p ON p.id = v.pedido_id
              LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
+             " . self::joinFallas() . "
              LEFT JOIN (SELECT venta_id, SUM(monto) AS total FROM gastos WHERE venta_id IS NOT NULL AND fecha <= ? GROUP BY venta_id) gd ON gd.venta_id = v.id
              WHERE v.fecha_venta <= ? AND NOT $entregada",
             [$fin, $fin, $fin]
@@ -338,9 +352,20 @@ class Reporte
 
         $aportes = $num(ActiveRecord::fetchArray("SELECT COALESCE(SUM(monto), 0) AS total FROM aportes WHERE tipo = 'aporte' AND fecha <= ?", [$fin]));
         $retiros = $num(ActiveRecord::fetchArray("SELECT COALESCE(SUM(monto), 0) AS total FROM aportes WHERE tipo = 'retiro' AND fecha <= ?", [$fin]));
+        $devoluciones = $num(ActiveRecord::fetchArray("SELECT COALESCE(SUM(monto), 0) AS total FROM aportes WHERE tipo = 'devolucion' AND fecha <= ?", [$fin]));
 
-        $efectivo = round($cobros + $aportes - $retiros - $gastos, 2);
-        $inventario = round($compras - $usado, 2);
+        // Correcciones de peso de los carretes (pesados en báscula, carrete roto o perdido): suben o bajan el inventario
+        $ajustesInv = Inventario::hayCarretes()
+            ? $num(ActiveRecord::fetchArray(
+                'SELECT COALESCE(SUM(a.delta_g * k.costo / k.peso_inicial_g), 0) AS total
+                 FROM carrete_ajustes a JOIN carretes k ON k.id = a.carrete_id
+                 WHERE DATE(a.creado_en) <= ?',
+                [$fin]
+            ))
+            : 0.0;
+
+        $efectivo = round($cobros + $aportes - $retiros - $devoluciones - $gastos, 2);
+        $inventario = round($compras - $usado + $ajustesInv, 2);
         $activos = round($efectivo + $porCobrar + $inventario + $enProceso, 2);
 
         return [
@@ -348,11 +373,13 @@ class Reporte
             'cobros'        => $cobros,
             'aportes'       => $aportes,
             'retiros'       => $retiros,
+            'devoluciones'  => $devoluciones,
             'pagos'         => $gastos,
             'efectivo'      => $efectivo,
             'por_cobrar'    => $porCobrar,
             'compras_inv'   => $compras,
             'material_usado' => $usado,
+            'ajustes_inv'   => $ajustesInv,
             'inventario'    => $inventario,
             'en_proceso'    => $enProceso,
             'activos'       => $activos,
@@ -364,7 +391,7 @@ class Reporte
     }
 
     // Caja del negocio al día de hoy
-    //  caja       = cobrado + aportes − retiros − pagado
+    //  caja       = cobrado + aportes − retiros − devoluciones de capital − pagado
     //  por_pagar  = lo que todavía debes pagar de las piezas vendidas (pintora, envíos y otros de la cotización
     //               que aún no registras como gasto real), estén entregadas o no
     //  disponible = caja − por_pagar: lo que puedes gastar hoy (por ejemplo en filamento) sin quedarte corto
@@ -374,6 +401,7 @@ class Reporte
             "SELECT (SELECT COALESCE(SUM(monto), 0) FROM pagos)                              AS cobros,
                     (SELECT COALESCE(SUM(monto), 0) FROM aportes WHERE tipo = 'aporte')      AS aportes,
                     (SELECT COALESCE(SUM(monto), 0) FROM aportes WHERE tipo = 'retiro')      AS retiros,
+                    (SELECT COALESCE(SUM(monto), 0) FROM aportes WHERE tipo = 'devolucion')  AS devoluciones,
                     (SELECT COALESCE(SUM(monto), 0) FROM gastos)                             AS gastos"
         )[0];
 
@@ -390,16 +418,19 @@ class Reporte
         $cobros = round((float) $t['cobros'], 2);
         $aportes = round((float) $t['aportes'], 2);
         $retiros = round((float) $t['retiros'], 2);
+        $devoluciones = round((float) $t['devoluciones'], 2);
         $gastos = round((float) $t['gastos'], 2);
-        $caja = round($cobros + $aportes - $retiros - $gastos, 2);
+        $caja = round($cobros + $aportes - $retiros - $devoluciones - $gastos, 2);
         $porPagar = round((float) $p[0]['total'], 2);
         $disponible = round($caja - $porPagar, 2);
 
         // Ganancia acumulada = lo ganado con piezas entregadas − gastos de operación − lo que ya retiraste.
-        // De la caja disponible, esa es la parte que puedes llevarte; el resto es para reponer material y fabricar.
+        // (La devolución de capital NO es ganancia: no entra aquí.)
         $ganancia = 0.0;
+        $noEfectivo = 0.0; // material, luz, desgaste y empaque de lo entregado: no salen a nadie, hay que reponerlos
         foreach (self::ventasEntregadas() as $f) {
             $ganancia += (float) $f['ingreso_neto'] - ((float) $f['c_material'] + (float) $f['c_maquina'] + (float) $f['c_empaque'] + (float) $f['c_directos']);
+            $noEfectivo += (float) $f['c_material'] + (float) $f['c_maquina'] + (float) $f['c_empaque'];
         }
         $ops = ActiveRecord::fetchArray(
             "SELECT COALESCE(SUM(g.monto), 0) AS total
@@ -407,17 +438,45 @@ class Reporte
              WHERE g.venta_id IS NULL AND cg.tipo = 'operativo'"
         );
         $gananciaAcumulada = round($ganancia - (float) $ops[0]['total'] - $retiros, 2);
-        // Parte de la ganancia que se queda en el negocio como reserva para repuestos y equipo (meta en Costos y margen).
-        // Un repuesto sale de la ganancia, así que la reserva se vuelve a llenar con las próximas ganancias antes de poder retirar.
-        $base = round(max(min($disponible, $gananciaAcumulada), 0), 2);
+
+        // Material por reponer = lo que costó fabricar lo entregado − lo que ya gastaste en comprar filamento
+        $comprasFil = ActiveRecord::fetchArray(
+            "SELECT (SELECT COALESCE(SUM(costo_total), 0) FROM compras_material WHERE origen <> 'inicial')
+                  + (SELECT COALESCE(SUM(g.monto), 0)
+                     FROM gastos g
+                     JOIN categorias_gasto cg ON cg.id = g.categoria_id
+                     LEFT JOIN compras_material cm ON cm.gasto_id = g.id
+                     WHERE cg.tipo = 'inventario' AND cm.id IS NULL) AS total"
+        );
+        $reponer = round(max($noEfectivo - (float) $comprasFil[0]['total'], 0), 2);
+
+        // El dinero disponible se reparte llenando en este orden:
+        //   1) material por reponer  2) reserva de repuestos y equipo  3) ganancia que puedes retirar
+        // Lo que sobre (por ejemplo tu capital) se queda junto a "para reponer": tampoco es ganancia.
         $meta = self::reservaMeta();
-        $reserva = round(min($base, $meta), 2);
-        $retirable = round($base - $reserva, 2);
+        $d = max($disponible, 0);
+        $g = max($gananciaAcumulada, 0);
+        $paraReponer = round(min($d, $reponer), 2);
+        $resto = $d - $paraReponer;
+        $reserva = round(min($resto, $meta, $g), 2);
+        $retirable = round(max(min($resto - $reserva, $g - $reserva), 0), 2);
+        $excedente = round($d - $paraReponer - $reserva - $retirable, 2); // capital y colchón sin asignar
+
+        // Capital: lo que has puesto (aportes + filamento que ya tenías) y cuándo se puede empezar a devolver
+        $ini = ActiveRecord::fetchArray("SELECT COALESCE(SUM(costo_total), 0) AS total FROM compras_material WHERE origen = 'inicial'");
+        $inversion = round($aportes + (float) $ini[0]['total'], 2);
+        $capitalNeto = round(max($inversion - $devoluciones, 0), 2);
+        $multiplo = self::capitalMultiplo();
+        $patrimonio = (float) self::balanceAl(date('Y-m'))['patrimonio'];
+        $capitalMeta = round($inversion * $multiplo, 2);
+        $capitalSano = $inversion > 0 && $patrimonio + 0.005 >= $capitalMeta;
+        $devolvible = $capitalSano ? round(max(min($excedente, $capitalNeto), 0), 2) : 0.0;
 
         return [
             'cobros'             => $cobros,
             'aportes'            => $aportes,
             'retiros'            => $retiros,
+            'devoluciones'       => $devoluciones,
             'gastos'             => $gastos,
             'caja'               => $caja,
             'por_pagar'          => $porPagar,
@@ -426,8 +485,30 @@ class Reporte
             'ganancia_retirable' => $retirable,
             'reserva_meta'       => $meta,
             'reserva'            => $reserva,
-            'para_reponer'       => round($disponible - $base, 2),
+            // todo lo que no es reserva ni ganancia: material por reponer + capital en el negocio
+            'para_reponer'       => round($paraReponer + $excedente, 2),
+            'reponer_pendiente'  => $reponer,
+            'material_cubierto'  => $paraReponer,
+            'capital_en_negocio' => $excedente,
+            'inversion'          => $inversion,
+            'capital_neto'       => $capitalNeto,
+            'capital_multiplo'   => $multiplo,
+            'capital_meta'       => $capitalMeta,
+            'patrimonio'         => round($patrimonio, 2),
+            'capital_sano'       => $capitalSano,
+            'capital_devolvible' => $devolvible,
         ];
+    }
+
+    // Cuántas veces la inversión debe valer el negocio para poder devolver capital (por defecto 3)
+    public static function capitalMultiplo(): float
+    {
+        try {
+            $f = ActiveRecord::fetchArray("SELECT valor FROM ajustes WHERE clave = 'capital_multiplo'");
+            return $f ? max((float) $f[0]['valor'], 1.0) : 3.0;
+        } catch (\Throwable $e) {
+            return 3.0;
+        }
     }
 
     // Meta de reserva para repuestos y equipo (Q). Si todavía no existe la tabla de ajustes, no hay reserva.

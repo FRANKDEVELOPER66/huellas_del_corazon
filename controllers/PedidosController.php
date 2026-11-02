@@ -51,6 +51,7 @@ class PedidosController
              v.id AS venta_id, v.precio_venta,
              COALESCE(pg.pagado, 0) AS pagado,
              v.precio_venta - COALESCE(pg.pagado, 0) AS saldo,
+             COALESCE(fa.gramos, 0) AS falla_g, COALESCE(fa.costo, 0) AS falla_q,
              CASE WHEN cp.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_pintura, 0) - COALESCE(gp.pintura, 0), 0) END AS falta_pintura,
              CASE WHEN ce.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_envio, 0) - COALESCE(gp.envio, 0), 0) END AS falta_envio,
              CASE WHEN co.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.otros_insumos, 0) - COALESCE(gp.otros, 0), 0) END AS falta_otros
@@ -59,6 +60,9 @@ class PedidosController
       LEFT JOIN ventas v ON v.pedido_id = p.id
       LEFT JOIN (SELECT venta_id, SUM(monto) AS pagado FROM pagos GROUP BY venta_id) pg ON pg.venta_id = v.id
       LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
+      " . (Inventario::hayConsumos()
+            ? "LEFT JOIN (SELECT pedido_id, SUM(gramos) AS gramos, SUM(costo) AS costo FROM carrete_consumos WHERE tipo = 'falla' GROUP BY pedido_id) fa ON fa.pedido_id = p.id"
+            : "LEFT JOIN (SELECT 0 AS pedido_id, 0 AS gramos, 0 AS costo FROM DUAL WHERE 1 = 0) fa ON fa.pedido_id = p.id") . "
       " . Reporte::joinsCostos() . "
       WHERE (? = '' OR p.estado = ?)
       ORDER BY p.fecha_pedido DESC, p.id DESC",
@@ -187,23 +191,109 @@ class PedidosController
             self::responder(0, 'Este pedido ya está en una etapa final y no se puede cambiar');
         }
 
-        // Para empezar a imprimir tiene que haber filamento suficiente en el inventario
+        // Para empezar a imprimir tiene que haber filamento suficiente (del color que pide la cotización)
         if ($siguiente === 'imprimiendo') {
             $faltan = Inventario::faltantes((int)$pedido->id);
             if ($faltan) {
                 $txt = array_map(
-                    fn($f) => $f['nombre'] . ': necesita ' . number_format($f['necesita_kg'], 3) . ' kg y hay ' . number_format($f['disponible_kg'], 3) . ' kg',
+                    fn($f) => ($f['color'] !== '' ? $f['color'] . ' ' : '') . $f['nombre'] . ': necesita ' . number_format($f['necesita_g'], 0) . ' g y hay ' . number_format($f['disponible_g'], 0) . ' g',
                     $faltan
                 );
                 self::responder(0, 'No hay filamento suficiente para imprimir. ' . implode('; ', $txt) . '. Registra la compra (o tu inventario inicial) en Gastos > Inventario de filamento');
             }
         }
 
-        if (!self::cambiarEtapa((int)$pedido->id, $pedido->estado, $siguiente)) {
-            self::responder(0, 'El pedido ya cambió de etapa. Recarga la pantalla');
+        // Al pasar a "imprimiendo" el filamento sale de los carretes: todo junto o nada
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+        $tocados = [];
+        try {
+            if (!self::cambiarEtapa((int)$pedido->id, $pedido->estado, $siguiente)) {
+                $db->rollBack();
+                self::responder(0, 'El pedido ya cambió de etapa. Recarga la pantalla');
+            }
+            if ($siguiente === 'imprimiendo') {
+                $tocados = Inventario::consumirPedido((int)$pedido->id);
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            self::responder(0, 'No se pudo pasar el pedido de etapa');
         }
 
-        self::responder(1, 'Pedido pasado a “' . self::ETAPAS[$siguiente] . '”', ['estado' => $siguiente]);
+        // Aviso de poco filamento en los colores que acaba de usar
+        $alertas = $tocados ? Inventario::alertasColores($tocados) : [];
+
+        self::responder(1, 'Pedido pasado a “' . self::ETAPAS[$siguiente] . '”', ['estado' => $siguiente, 'alertas' => $alertas]);
+    }
+
+    // Carretes que puede usar una impresión fallida de este pedido (primero los de los colores de la pieza)
+    public static function carretesAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        $pedido = Pedido::find((int)($_GET['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        self::responder(1, '', ['datos' => Inventario::carretesParaFalla((int)$pedido->id)]);
+    }
+
+    // Registra una impresión fallida: saca los gramos perdidos del carrete y suma su costo a esa pieza.
+    // POST: id (pedido), carrete_id, gramos, motivo. Solo mientras el pedido está en "Imprimiendo".
+    public static function fallaAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        if (!Inventario::hayConsumos()) {
+            self::responder(0, 'Falta crear las tablas de carretes: ejecuta sql/carretes_paso2.sql');
+        }
+        $pedido = Pedido::find((int)($_POST['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        if ($pedido->estado !== 'imprimiendo') {
+            self::responder(0, 'Una impresión fallida se registra mientras el pedido está en “Imprimiendo”');
+        }
+
+        $gramos = round((float)($_POST['gramos'] ?? 0), 2);
+        if (!($gramos > 0) || $gramos > 5000) {
+            self::responder(0, 'Escribe los gramos que se perdieron (mayor a 0)');
+        }
+        $motivo = trim((string)($_POST['motivo'] ?? ''));
+        if (mb_strlen($motivo) < 3) {
+            self::responder(0, 'Elige o escribe el motivo de la falla');
+        }
+
+        $filas = ActiveRecord::fetchArray('SELECT * FROM carretes WHERE id = ?', [(int)($_POST['carrete_id'] ?? 0)]);
+        if (!$filas) {
+            self::responder(0, 'Elige de qué carrete salió el filamento');
+        }
+        $k = $filas[0];
+        if ($gramos > (float)$k['gramos_actuales'] + 0.005) {
+            self::responder(0, 'Ese carrete solo tiene ' . number_format((float)$k['gramos_actuales'], 0) . ' g. Si el peso está mal, corrígelo en el inventario; si la falla usó dos carretes, regístrala en dos partes');
+        }
+
+        $costo = round($gramos * (float)$k['costo'] / (float)$k['peso_inicial_g'], 2);
+
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+        try {
+            $db->prepare('UPDATE carretes SET gramos_actuales = gramos_actuales - ? WHERE id = ?')->execute([$gramos, (int)$k['id']]);
+            $db->prepare("INSERT INTO carrete_consumos (carrete_id, pedido_id, tipo, gramos, costo, motivo) VALUES (?, ?, 'falla', ?, ?, ?)")
+                ->execute([(int)$k['id'], (int)$pedido->id, $gramos, $costo, mb_substr($motivo, 0, 250)]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            self::responder(0, 'No se pudo registrar la falla');
+        }
+
+        $alertas = Inventario::alertasColores([[(int)$k['material_id'], (string)$k['color']]]);
+        self::responder(1, 'Falla registrada: ' . number_format($gramos, 0) . ' g · Q' . number_format($costo, 2) . ' se suman al costo de la pieza', ['costo' => $costo, 'alertas' => $alertas]);
     }
 
     // Finaliza la venta: el pedido debe estar "listo" y tener venta. Si falta dinero por cobrar,
@@ -233,6 +323,7 @@ class PedidosController
         if (count($partes) !== 3 || !checkdate((int)$partes[1], (int)$partes[2], (int)$partes[0])) {
             self::responder(0, 'La fecha de entrega no es válida');
         }
+        self::exigirAbierta($fecha);
 
         $saldo = round($venta->saldo(), 2);
         $pago = null;

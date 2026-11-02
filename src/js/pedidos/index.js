@@ -24,6 +24,25 @@ let cotizaciones = [];
 async function cargar() {
     pedidos = (await get('pedidos/listar')).datos || [];
     pintar();
+    cargarAlertas();
+}
+
+// ── Aviso de poco filamento ─────────────────────────────────────────────────
+const gr = (n) => num(n).toLocaleString('es-GT', { maximumFractionDigits: 0 }) + ' g';
+const textoAlerta = (a) => a.agotado
+    ? `<b>${esc(a.color)}</b> (${esc(a.material)}): <b>se acabó</b>${a.pedidos?.length ? ` y lo necesita${a.pedidos.length > 1 ? 'n' : ''} ${a.pedidos.map(esc).join(', ')}` : ''}`
+    : `<b>${esc(a.color)}</b> (${esc(a.material)}) está por acabarse: quedan <b>${gr(a.gramos)}</b>${a.carretes > 1 ? ` en ${a.carretes} carretes` : ''}${a.pedidos?.length ? ` · lo espera${a.pedidos.length > 1 ? 'n' : ''} ${a.pedidos.map(esc).join(', ')}` : ''}`;
+
+async function cargarAlertas() {
+    const r = await get('inventario/alertas');
+    const lista = r.codigo === 1 ? r.datos : [];
+    $('alertasFil').innerHTML = lista.length
+        ? `<div class="mb-3 p-2 rounded" style="background:#fff4f6;border:1px solid #f1b5c4;border-left:5px solid #d6336c">
+               <div class="fw-bold mb-1" style="color:#b0224f"><i class="bi bi-exclamation-triangle-fill me-1"></i>Filamento por reponer</div>
+               ${lista.map((a) => `<div class="small">${textoAlerta(a)}</div>`).join('')}
+               <a href="${BASE}/gastos" class="small">Ir al inventario para comprar o corregir</a>
+           </div>`
+        : '';
 }
 
 // ── Tablero ─────────────────────────────────────────────────────────────────
@@ -70,9 +89,11 @@ function tarjeta(p) {
             ${p.fecha_entrega ? `<div class="small ${vencido ? 'neg fw-bold' : ''}"><i class="bi bi-calendar-event me-1"></i>${fecha(p.fecha_entrega)}${vencido ? ' · atrasado' : ''}</div>` : ''}
             ${dinero}
             ${avisoPintora(p)}
+            ${num(p.falla_g) > 0 ? `<div class="small neg mt-1"><i class="bi bi-x-octagon-fill"></i> Fallas: <b>${gr(p.falla_g)}</b> · ${Q(p.falla_q)} extra</div>` : ''}
             ${p.notas ? `<div class="hc-ayuda mt-1">${esc(p.notas)}</div>` : ''}
             <div class="d-flex gap-1 mt-2">
                 ${final ? '' : `<button class="btn btn-sm btn-outline-dark" data-acc="editar" data-id="${p.id}" title="Editar"><i class="bi bi-pencil"></i></button>`}
+                ${p.estado === 'imprimiendo' && conVenta ? `<button class="btn btn-sm btn-outline-danger" data-acc="falla" data-id="${p.id}" title="La impresión falló: registrar el filamento perdido"><i class="bi bi-x-octagon"></i> Falló</button>` : ''}
                 ${conVenta
                     ? `<button class="btn btn-sm btn-hc ms-auto" data-acc="cobros" data-id="${p.id}"><i class="bi bi-cash-coin"></i> Cobros</button>`
                     : (p.estado === 'cancelado' ? '' : `<button class="btn btn-sm btn-hc ms-auto" data-acc="venta" data-id="${p.id}"><i class="bi bi-receipt"></i> Venta</button>`)}
@@ -127,7 +148,81 @@ async function avanzar(p) {
         return cargar();
     }
     toast.fire({ icon: 'success', title: r.mensaje });
-    cargar();
+    await cargar();
+    avisarFilamento(r.alertas);
+}
+
+// Después de gastar filamento: avisa de los colores que quedaron bajos
+function avisarFilamento(alertas) {
+    if (!alertas?.length) return;
+    Swal.fire({
+        icon: 'warning',
+        title: 'Filamento por acabarse',
+        html: `<div class="text-start">${alertas.map((a) => `<div class="mb-1">${textoAlerta(a)}</div>`).join('')}</div>`,
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: ORO,
+    });
+}
+
+// ── Impresión fallida: el filamento perdido sale del carrete y se suma al costo de la pieza ──
+const MOTIVOS_FALLA = ['Espagueti (se soltó la pieza)', 'Se despegó de la cama', 'Se atascó el filamento', 'Falló el soporte', 'Se acabó el filamento a medias', 'Otro'];
+
+async function falla(p) {
+    const r = await get('pedidos/carretes', { id: p.id });
+    const carretes = r.datos || [];
+    if (!carretes.length) {
+        return Swal.fire({ icon: 'info', title: 'No hay carretes con filamento', text: 'Registra tus carretes en Gastos > Inventario de filamento.', confirmButtonColor: ORO });
+    }
+    const opcionesK = carretes.map((k) => `<option value="${k.id}">${k.sugerido ? '★ ' : ''}${esc(k.color)} · ${esc(k.material)} · ${gr(k.gramos_actuales)}</option>`).join('');
+
+    const { value } = await Swal.fire({
+        titleText: `Falló “${p.nombre_mascota}”`,
+        width: 520,
+        html: `
+            <div class="text-start">
+                <div class="hc-ayuda mb-2">El filamento perdido sale del carrete y su costo se suma a <b>esta pieza</b> (baja su ganancia). El pedido sigue en Imprimiendo. ★ = color de esta pieza.</div>
+                <label class="form-label mb-1">Carrete que se usó</label>
+                <select id="fCarrete" class="form-select mb-2">${opcionesK}</select>
+                <label class="form-label mb-1">Gramos perdidos</label>
+                <input id="fGramos" type="number" min="1" step="any" class="form-control mb-1" placeholder="Ej. 80">
+                <div id="fCosto" class="hc-ayuda mb-2"></div>
+                <label class="form-label mb-1">Motivo</label>
+                <select id="fMotivo" class="form-select mb-2">${MOTIVOS_FALLA.map((m) => `<option>${m}</option>`).join('')}</select>
+                <input id="fOtro" class="form-control d-none" maxlength="200" placeholder="Describe qué pasó">
+            </div>`,
+        didOpen: (pop) => {
+            const refrescar = () => {
+                const k = carretes.find((x) => String(x.id) === pop.querySelector('#fCarrete').value);
+                const g = parseFloat(pop.querySelector('#fGramos').value) || 0;
+                pop.querySelector('#fCosto').innerHTML = k && g > 0
+                    ? `Cuesta <b>${Q(g * num(k.costo) / num(k.peso_inicial_g))}</b>${g > num(k.gramos_actuales) ? ' · <span class="neg">el carrete solo tiene ' + gr(k.gramos_actuales) + '</span>' : ''}`
+                    : '';
+                pop.querySelector('#fOtro').classList.toggle('d-none', pop.querySelector('#fMotivo').value !== 'Otro');
+            };
+            pop.addEventListener('input', refrescar);
+            refrescar();
+        },
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Registrar falla',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#b42318',
+        preConfirm: () => {
+            const pop = Swal.getPopup();
+            const gramos = parseFloat(pop.querySelector('#fGramos').value);
+            let motivo = pop.querySelector('#fMotivo').value;
+            if (motivo === 'Otro') motivo = pop.querySelector('#fOtro').value.trim();
+            if (!(gramos > 0)) { Swal.showValidationMessage('Escribe los gramos perdidos'); return false; }
+            if (motivo.length < 3) { Swal.showValidationMessage('Describe qué pasó'); return false; }
+            return { id: p.id, carrete_id: pop.querySelector('#fCarrete').value, gramos, motivo };
+        },
+    });
+    if (!value) return;
+    const res = await post('pedidos/falla', value);
+    if (res.codigo !== 1) return error(res);
+    toast.fire({ icon: 'success', title: res.mensaje });
+    await cargar();
+    avisarFilamento(res.alertas);
 }
 
 // ── Finalizar venta: exige el pago completo y deja el pedido en Entregado ───
@@ -384,6 +479,7 @@ $('tablero').addEventListener('click', (e) => {
     const acc = btn.dataset.acc;
     if (acc === 'avanzar') avanzar(p);
     if (acc === 'finalizar') finalizar(p);
+    if (acc === 'falla') falla(p);
     if (acc === 'editar') formPedido(p);
     if (acc === 'cobros') cobros(p);
     if (acc === 'venta') registrarVenta(p);

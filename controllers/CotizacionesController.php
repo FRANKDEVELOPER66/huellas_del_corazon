@@ -6,6 +6,7 @@ use MVC\Router;
 use Model\ActiveRecord;
 use Model\Calculadora;
 use Model\Configuracion;
+use Model\Inventario;
 use Model\Cotizacion;
 use Model\Empaque;
 use Model\CotizacionParte;
@@ -41,7 +42,7 @@ class CotizacionesController
     }
 
     // Vista previa en vivo: calcula sin guardar nada.
-    // POST: partes (JSON: [{nombre, material_id, gramos, minutos}]), alto_cm, pintor_id,
+    // POST: partes (JSON: [{nombre, material_id, color, gramos, minutos}]), alto_cm, pintor_id,
     //       costo_pintura (vacío = tarifa del pintor), costo_envio, otros_insumos, margen_pct (opcional),
     //       empaque_id (vacío = estándar de la configuración) o empaque_costo (monto libre)
     public static function calcularAPI(Router $router): void
@@ -85,6 +86,7 @@ class CotizacionesController
                 $parte = new CotizacionParte([
                     'cotizacion_id' => $cotizacionId,
                     'material_id'   => $p['material_id'],
+                    'color'         => $p['color'],
                     'nombre'        => $p['nombre'],
                     'gramos'        => $p['gramos'],
                     'minutos'       => $p['minutos']
@@ -189,10 +191,14 @@ class CotizacionesController
                 self::responder(0, "Revisa los gramos y minutos de la parte {$n}");
             }
 
+            // Con color elegido se cotiza con lo que cuestan los carretes de ese color; sin color, con el costo general del material
+            $color = Inventario::hayColor() ? (mb_substr(trim((string)($p['color'] ?? '')), 0, 40) ?: null) : null;
+
             $partes[] = [
                 'nombre'      => trim($p['nombre'] ?? '') ?: "Parte {$n}",
                 'material_id' => (int)$material->id,
-                'costo_kg'    => (float)$material->costo_kg,
+                'color'       => $color,
+                'costo_kg'    => Inventario::costoKg((int)$material->id, $color, (float)$material->costo_kg),
                 'gramos'      => $gramos,
                 'minutos'     => $minutos
             ];
