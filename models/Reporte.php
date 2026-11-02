@@ -50,19 +50,25 @@ class Reporte
     // Una venta con su cuadro: estimado (cotización) contra real. Se arma aquí, no en una vista de MySQL.
     private static function sqlVentas(): string
     {
-        return "SELECT t.*, ROUND(t.ganancia_real / t.ingreso_neto * 100, 1) AS margen_real_pct
+        return "SELECT t.*, ROUND(t.ganancia_real / NULLIF(t.ingreso_neto, 0) * 100, 1) AS margen_real_pct
                 FROM (
-                  SELECT v.id, v.fecha_venta, c.nombre AS cliente, v.descripcion, v.precio_venta, v.ingreso_neto,
+                  SELECT v.id, v.fecha_venta, c.nombre AS cliente, v.descripcion, v.precio_venta,
+                         CASE WHEN p.estado = 'cancelado' THEN COALESCE(cn.retenido, 0) ELSE v.ingreso_neto END AS ingreso_neto,
                          COALESCE(pg.pagado, 0) AS pagado,
-                         v.precio_venta - COALESCE(pg.pagado, 0) AS saldo,
+                         CASE WHEN p.estado = 'cancelado' THEN 0 ELSE v.precio_venta - COALESCE(pg.pagado, 0) END AS saldo,
+                         p.estado AS estado_pedido, cn.motivo AS motivo_cancelacion, cn.fecha AS fecha_cancelacion, cn.devuelto AS devuelto_cancelacion,
                          q.costo_total AS costo_estimado,
                          COALESCE(gp.pintura, 0) + COALESCE(gp.envio, 0) + COALESCE(gp.otros, 0) AS gastos_directos_reales,
                          (" . self::PENDIENTE_DIRECTO . " > 0.005) AS gastos_pendientes,
                          v.ingreso_neto - q.costo_total AS ganancia_estimada,
                          COALESCE(fa.falla, 0) AS costo_fallas,
-                         v.ingreso_neto - (COALESCE(q.costo_material + q.costo_luz + q.costo_desgaste + q.costo_empaque, 0) + COALESCE(fa.falla, 0) + " . self::COSTO_DIRECTO . ") AS ganancia_real
+                         CASE WHEN p.estado = 'cancelado'
+                              THEN COALESCE(cn.retenido, 0) - COALESCE(cn.costo_material, 0) - (COALESCE(gp.pintura, 0) + COALESCE(gp.envio, 0) + COALESCE(gp.otros, 0))
+                              ELSE v.ingreso_neto - (COALESCE(q.costo_material + q.costo_luz + q.costo_desgaste + q.costo_empaque, 0) + COALESCE(fa.falla, 0) + " . self::COSTO_DIRECTO . ") END AS ganancia_real
                   FROM ventas v
                   JOIN clientes c ON c.id = v.cliente_id
+                  LEFT JOIN pedidos p ON p.id = v.pedido_id
+                  " . Cancelacion::join() . "
                   LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
                   LEFT JOIN (SELECT venta_id, SUM(monto) AS pagado FROM pagos GROUP BY venta_id) pg ON pg.venta_id = v.id
                   " . self::joinFallas() . "
@@ -123,20 +129,23 @@ class Reporte
     // Todas las ventas entregadas (y las antiguas sin pedido), con sus costos por componente
     private static function ventasEntregadas(): array
     {
+        $canc = "(p.estado = 'cancelado')";
         return ActiveRecord::fetchArray(
-            "SELECT v.id, v.descripcion, v.ingreso_neto,
-                    COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) AS c_material,
-                    COALESCE(q.costo_luz + q.costo_desgaste, 0)    AS c_maquina,
-                    COALESCE(q.costo_empaque, 0)                   AS c_empaque,
-                    " . self::COSTO_DIRECTO . "                    AS c_directos,
-                    " . self::PENDIENTE_DIRECTO . "                AS pendiente_directos,
-                    COALESCE(p.entregado_en, v.fecha_venta)        AS fecha_res
+            "SELECT v.id, v.descripcion,
+                    CASE WHEN $canc THEN COALESCE(cn.retenido, 0) ELSE v.ingreso_neto END AS ingreso_neto,
+                    CASE WHEN $canc THEN COALESCE(cn.costo_material, 0) ELSE COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) END AS c_material,
+                    CASE WHEN $canc THEN 0 ELSE COALESCE(q.costo_luz + q.costo_desgaste, 0) END AS c_maquina,
+                    CASE WHEN $canc THEN 0 ELSE COALESCE(q.costo_empaque, 0) END AS c_empaque,
+                    CASE WHEN $canc THEN COALESCE(gp.pintura, 0) + COALESCE(gp.envio, 0) + COALESCE(gp.otros, 0) ELSE " . self::COSTO_DIRECTO . " END AS c_directos,
+                    CASE WHEN $canc THEN 0 ELSE " . self::PENDIENTE_DIRECTO . " END AS pendiente_directos,
+                    CASE WHEN $canc THEN cn.fecha ELSE COALESCE(p.entregado_en, v.fecha_venta) END AS fecha_res
              FROM ventas v
              LEFT JOIN pedidos p       ON p.id = v.pedido_id
+             " . Cancelacion::join() . "
              LEFT JOIN cotizaciones q  ON q.id = v.cotizacion_id
              " . self::joinFallas() . "
              " . self::joinsCostos() . "
-             WHERE v.pedido_id IS NULL OR p.estado = 'entregado'"
+             WHERE v.pedido_id IS NULL OR p.estado = 'entregado' OR ($canc AND cn.id IS NOT NULL)"
         );
     }
 
@@ -289,6 +298,7 @@ class Reporte
         $gastos = $num(ActiveRecord::fetchArray('SELECT COALESCE(SUM(monto), 0) AS total FROM gastos WHERE fecha <= ?', [$fin]));
 
         // “Entregada al cierre”: pedido entregado (o venta antigua sin pedido) con fecha de entrega <= fin
+        $cancelEf = "(p.estado = 'cancelado' AND cn.fecha <= '$fin')"; // cancelado y ya cancelado al cierre del mes
         $entregada = "((v.pedido_id IS NULL OR p.estado = 'entregado') AND COALESCE(p.entregado_en, v.fecha_venta) <= ?)";
 
         $porCobrar = $num(ActiveRecord::fetchArray(
@@ -304,8 +314,9 @@ class Reporte
             "SELECT COALESCE(SUM(pg.pagado), 0) AS total
              FROM ventas v
              LEFT JOIN pedidos p ON p.id = v.pedido_id
+             " . Cancelacion::join() . "
              JOIN (SELECT venta_id, SUM(monto) AS pagado FROM pagos WHERE fecha <= ? GROUP BY venta_id) pg ON pg.venta_id = v.id
-             WHERE v.fecha_venta <= ? AND NOT $entregada",
+             WHERE v.fecha_venta <= ? AND NOT $entregada AND NOT $cancelEf",
             [$fin, $fin, $fin]
         ));
 
@@ -332,10 +343,12 @@ class Reporte
         ));
 
         $usado = $num(ActiveRecord::fetchArray(
-            'SELECT COALESCE(SUM(q.costo_material + COALESCE(fa.falla, 0)), 0) AS total
+            "SELECT COALESCE(SUM(CASE WHEN $cancelEf THEN COALESCE(cn.costo_material, 0) ELSE q.costo_material + COALESCE(fa.falla, 0) END), 0) AS total
              FROM ventas v JOIN cotizaciones q ON q.id = v.cotizacion_id
-             ' . self::joinFallas() . '
-             WHERE v.fecha_venta <= ?',
+             LEFT JOIN pedidos p ON p.id = v.pedido_id
+             " . Cancelacion::join() . "
+             " . self::joinFallas() . "
+             WHERE v.fecha_venta <= ?",
             [$fin]
         ));
 
@@ -343,10 +356,11 @@ class Reporte
             "SELECT COALESCE(SUM(COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) + COALESCE(gd.total, 0)), 0) AS total
              FROM ventas v
              LEFT JOIN pedidos p ON p.id = v.pedido_id
+             " . Cancelacion::join() . "
              LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
              " . self::joinFallas() . "
              LEFT JOIN (SELECT venta_id, SUM(monto) AS total FROM gastos WHERE venta_id IS NOT NULL AND fecha <= ? GROUP BY venta_id) gd ON gd.venta_id = v.id
-             WHERE v.fecha_venta <= ? AND NOT $entregada",
+             WHERE v.fecha_venta <= ? AND NOT $entregada AND NOT $cancelEf",
             [$fin, $fin, $fin]
         ));
 

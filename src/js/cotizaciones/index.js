@@ -140,7 +140,7 @@ function llenarColores(fila, elegido = '') {
     const sel = fila.querySelector('.p-color');
     sel.innerHTML = lista.length
         ? `<option value="">Elige color…</option>` + lista.map((c) => `<option value="${esc(c.color)}" ${c.color === elegido ? 'selected' : ''}>${esc(c.color)} · ${gr(c.gramos)} · ${Q0(c.costo_kg)}</option>`).join('')
-        : `<option value="">Sin carretes (precio general)</option>`;
+        : `<option value="">Sin carretes de este material: regístralos en Gastos &gt; Inventario</option>`;
     avisoColor(fila);
 }
 
@@ -306,13 +306,24 @@ async function guardar() {
     if (!leerPartes().length) {
         return toast.fire({ icon: 'warning', title: 'Agrega los gramos de al menos una parte' });
     }
-    // Si el material tiene carretes registrados, hay que elegir el color: de ahí sale el precio real y el filamento
-    const sinColor = [...document.querySelectorAll('.parte-fila[data-parte]')].find((f) => {
-        const hayColores = colores.some((c) => String(c.material_id) === String(f.querySelector('.p-material').value));
-        return hayColores && !f.querySelector('.p-color').value && (parseFloat(f.querySelector('.p-gramos').value) || 0) > 0;
-    });
-    if (sinColor) {
-        return toast.fire({ icon: 'warning', title: `Elige el color de “${sinColor.querySelector('.p-nombre').value.trim() || 'cada parte'}”` });
+    // Toda parte sale de un carrete real: de ahí sale el precio del filamento y lo que se descuenta al imprimir
+    const filas = [...document.querySelectorAll('.parte-fila[data-parte]')].filter((f) => (parseFloat(f.querySelector('.p-gramos').value) || 0) > 0);
+    for (const f of filas) {
+        const nombre = f.querySelector('.p-nombre').value.trim() || 'cada parte';
+        const mat = f.querySelector('.p-material');
+        const hayColores = colores.some((c) => String(c.material_id) === String(mat.value));
+        if (!hayColores) {
+            return Swal.fire({
+                icon: 'warning',
+                title: 'No tienes carretes de este material',
+                html: `Para cotizar “${esc(nombre)}” (${esc(mat.selectedOptions[0]?.text || 'material')}) primero registra el carrete en <b>Gastos &gt; Inventario de filamento</b>.`,
+                confirmButtonText: 'OK, entendido',
+                confirmButtonColor: ORO,
+            });
+        }
+        if (!f.querySelector('.p-color').value) {
+            return toast.fire({ icon: 'warning', title: `Elige el carrete (color) de “${nombre}”` });
+        }
     }
 
     const r = await post('cotizaciones/crear', datos);
@@ -390,9 +401,9 @@ async function cargarHistorial() {
             <td class="text-end"><b>${Q0(c.precio_sugerido)}</b></td>
             <td class="text-end text-nowrap">
                 <button class="btn btn-sm btn-outline-dark" data-ver="${c.id}" title="Ver el cuadre"><i class="bi bi-eye"></i></button>
-                ${vendida
-                    ? '<span class="hc-chip mx-1"><i class="bi bi-check-circle-fill text-success"></i> Vendida</span>'
-                    : `<button class="btn btn-sm btn-hc" data-vender="${c.id}"><i class="bi bi-cash-coin"></i> Vender</button>`}
+                <a class="btn btn-sm btn-outline-secondary" href="${BASE}/cotizaciones/proforma?id=${c.id}" target="_blank" rel="noopener" title="Proforma para el cliente (PDF)"><i class="bi bi-file-earmark-pdf"></i></a>
+                ${vendida ? `<span class="hc-chip mx-1" title="Ya se vendió; puedes venderla otra vez a otro cliente"><i class="bi bi-check-circle-fill text-success"></i> Vendida${Number(c.ventas) > 1 ? ` ×${Number(c.ventas)}` : ''}</span>` : ''}
+                <button class="btn btn-sm btn-hc" data-vender="${c.id}"><i class="bi bi-cash-coin"></i> Vender</button>
                 <button class="btn btn-sm btn-outline-danger" data-eliminar="${c.id}" ${vendida ? 'disabled title="Tiene una venta registrada"' : 'title="Eliminar"'}><i class="bi bi-trash"></i></button>
             </td>
         </tr>`;
@@ -456,7 +467,7 @@ async function abrirVenta(id) {
     const imp = num(detalle.datos.impuesto_pct);
     const costo = num(c.costo_total);
     const gananciaDe = (precio) => precio / (1 + imp / 100) - costo;
-    const pideCliente = !c.cliente_id;
+    const pideCliente = true; // siempre se elige: la misma pieza se puede vender a otro cliente
     const hoy = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
 
     const { value: form } = await Swal.fire({
@@ -470,11 +481,44 @@ async function abrirVenta(id) {
                 <input id="vPrecio" type="number" min="0" step="any" class="form-control mb-2" value="${Number(c.precio_sugerido)}">
                 <label class="form-label mb-1">Anticipo recibido (Q)</label>
                 <input id="vAnticipo" type="number" min="0" step="any" class="form-control mb-2" value="0">
+                <label class="form-label mb-1">Comprobante del anticipo <span class="hc-ayuda">(captura de la transferencia)</span></label>
+                <input id="vArchivo" type="file" accept="image/*,application/pdf" class="form-control mb-2">
                 <label class="form-label mb-1">Fecha de la venta</label>
                 <input id="vFecha" type="date" class="form-control ${pideCliente ? 'mb-2' : ''}" value="${hoy}">
-                ${pideCliente ? `<label class="form-label mb-1">Cliente</label><select id="vCliente" class="form-select">${opciones(clientes, 'Elige un cliente')}</select>` : ''}
+                ${pideCliente ? `<label class="form-label mb-1">Cliente</label>
+                <div class="d-flex gap-2">
+                    <select id="vCliente" class="form-select">${opciones(clientes, clientes.length ? 'Elige un cliente' : 'Aún no hay clientes: crea uno', c.cliente_id)}</select>
+                    <button type="button" id="vNuevoCli" class="btn btn-outline-dark text-nowrap"><i class="bi bi-person-plus-fill"></i> Nuevo</button>
+                </div>
+                <div id="vCliForm" class="d-none mt-2 p-2 rounded" style="background:#f8f5ee;border:1px solid #e5dcc3">
+                    <input id="vCliNombre" class="form-control mb-2" maxlength="120" placeholder="Nombre del cliente">
+                    <input id="vCliTel" class="form-control mb-2" maxlength="30" placeholder="Teléfono (opcional)">
+                    <button type="button" id="vCliGuardar" class="btn btn-sm btn-hc">Guardar cliente</button>
+                    <button type="button" id="vCliCancelar" class="btn btn-sm btn-link text-secondary">Cancelar</button>
+                </div>` : ''}
             </div>`,
         didOpen: (pop) => {
+            // Cliente nuevo sin salir de esta ventana
+            const formCli = pop.querySelector('#vCliForm');
+            const abrirCli = () => { formCli.classList.remove('d-none'); pop.querySelector('#vCliNombre').focus(); };
+            pop.querySelector('#vNuevoCli').addEventListener('click', abrirCli);
+            pop.querySelector('#vCliCancelar').addEventListener('click', () => formCli.classList.add('d-none'));
+            pop.querySelector('#vCliGuardar').addEventListener('click', async () => {
+                const nombre = pop.querySelector('#vCliNombre').value.trim();
+                if (!nombre) return Swal.showValidationMessage('Escribe el nombre del cliente');
+                Swal.resetValidationMessage();
+                const rc = await post('clientes/crear', { nombre, telefono: pop.querySelector('#vCliTel').value.trim() });
+                if (rc.codigo !== 1) return Swal.showValidationMessage(rc.mensaje || 'No se pudo guardar el cliente');
+                clientes = (await get('clientes/listar')).datos || [];
+                if (typeof llenarClientes === 'function') llenarClientes();
+                pop.querySelector('#vCliente').innerHTML = opciones(clientes, 'Elige un cliente', rc.id);
+                pop.querySelector('#vCliente').value = String(rc.id);
+                formCli.classList.add('d-none');
+                pop.querySelector('#vCliNombre').value = '';
+                pop.querySelector('#vCliTel').value = '';
+            });
+            if (!clientes.length) abrirCli();
+
             // Al cambiar el precio, la ganancia se recalcula en vivo
             pop.querySelector('#vPrecio').addEventListener('input', (e) => {
                 const precio = parseFloat(e.target.value) || 0;
@@ -500,7 +544,11 @@ async function abrirVenta(id) {
             if (anticipo < 0 || anticipo > precio) return invalido('El anticipo no puede ser mayor al precio');
             if (!cliente) return invalido('Elige el cliente');
 
-            return { precio_venta: precio, anticipo, fecha_venta: p.querySelector('#vFecha').value, cliente_id: cliente };
+            const archivo = p.querySelector('#vArchivo').files[0] || null;
+            if (archivo && archivo.size > 5 * 1024 * 1024) return invalido('El comprobante pesa más de 5 MB');
+            if (archivo && !(anticipo > 0)) return invalido('Subiste un comprobante pero el anticipo está en 0');
+
+            return { precio_venta: precio, anticipo, fecha_venta: p.querySelector('#vFecha').value, cliente_id: cliente, comprobante: archivo };
         },
     });
     if (!form) return;
@@ -509,10 +557,13 @@ async function abrirVenta(id) {
     if (r.codigo !== 1) {
         return Swal.fire({ icon: 'error', title: 'No se pudo registrar', text: r.mensaje, confirmButtonColor: ORO });
     }
-    toast.fire({
+    Swal.fire({
+        position: 'top-end',
         icon: 'success',
-        title: 'Venta registrada: el pedido quedó en Solicitado. Pásalo a Imprimiendo en Pedidos cuando empieces',
-        timer: 5000,
+        title: '¡Venta registrada!',
+        text: 'El pedido quedó en Solicitado',
+        showConfirmButton: false,
+        timer: 2200,
     });
     cargarHistorial(); // el botón pasa a “Vendida”
 }

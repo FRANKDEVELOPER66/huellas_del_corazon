@@ -74,10 +74,11 @@ class Inventario
         return "SELECT cp.material_id, SUM(cp.gramos * (1 + COALESCE(cfg.merma_pct, 0) / 100)) / 1000 AS kg
                 FROM ventas v
                 JOIN pedidos p ON p.id = v.pedido_id
+                " . Cancelacion::join() . "
                 JOIN cotizaciones q ON q.id = v.cotizacion_id
                 JOIN configuraciones cfg ON cfg.id = q.configuracion_id
                 JOIN cotizacion_partes cp ON cp.cotizacion_id = q.id
-                WHERE p.estado NOT IN ('solicitado', 'cancelado')
+                WHERE p.estado <> 'solicitado' AND (p.estado <> 'cancelado' OR cn.etapa <> 'solicitado')
                 GROUP BY cp.material_id";
     }
 

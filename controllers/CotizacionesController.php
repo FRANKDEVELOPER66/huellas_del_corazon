@@ -65,6 +65,23 @@ class CotizacionesController
 
         [$cfg, $partes, $r, $pintorId, $alto] = self::calcularDesdePost();
 
+        // Con carretes en el sistema, toda parte debe salir de un carrete real: así el precio y el descuento de filamento son exactos
+        if (Inventario::hayCarretes()) {
+            $hay = [];
+            foreach (Inventario::colores() as $c) {
+                $hay[$c['material_id'] . '|' . mb_strtolower($c['color'])] = true;
+            }
+            foreach ($partes as $i => $p) {
+                $n = $i + 1;
+                if (!$p['color']) {
+                    self::responder(0, "Elige el carrete (color) de la parte {$n}. Si no tienes carretes de ese material, regístralos en Gastos > Inventario de filamento");
+                }
+                if (!isset($hay[$p['material_id'] . '|' . mb_strtolower($p['color'])])) {
+                    self::responder(0, "No hay carrete de ese color con filamento para la parte {$n}. Regístralo en Gastos > Inventario de filamento");
+                }
+            }
+        }
+
         $cotizacion = new Cotizacion(array_merge($r, [
             'cliente_id'       => (int)($_POST['cliente_id'] ?? 0) ?: null,
             'configuracion_id' => (int)$cfg->id,

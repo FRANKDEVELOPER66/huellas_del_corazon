@@ -4,6 +4,7 @@ namespace Controllers;
 
 use MVC\Router;
 use Model\ActiveRecord;
+use Model\Cancelacion;
 use Model\Inventario;
 use Model\Pago;
 use Model\Pedido;
@@ -48,18 +49,21 @@ class PedidosController
 
         $datos = ActiveRecord::fetchArray(
             "SELECT p.*, c.nombre AS cliente,
-             v.id AS venta_id, v.precio_venta,
+             v.id AS venta_id, v.precio_venta, qp.precio_sugerido AS precio_cotizado,
              COALESCE(pg.pagado, 0) AS pagado,
-             v.precio_venta - COALESCE(pg.pagado, 0) AS saldo,
+             CASE WHEN p.estado = 'cancelado' THEN 0 ELSE v.precio_venta - COALESCE(pg.pagado, 0) END AS saldo,
              COALESCE(fa.gramos, 0) AS falla_g, COALESCE(fa.costo, 0) AS falla_q,
+             cn.motivo AS cancel_motivo, cn.fecha AS cancel_fecha, cn.devuelto AS cancel_devuelto, cn.retenido AS cancel_retenido,
              CASE WHEN cp.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_pintura, 0) - COALESCE(gp.pintura, 0), 0) END AS falta_pintura,
              CASE WHEN ce.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_envio, 0) - COALESCE(gp.envio, 0), 0) END AS falta_envio,
              CASE WHEN co.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.otros_insumos, 0) - COALESCE(gp.otros, 0), 0) END AS falta_otros
       FROM pedidos p
       JOIN clientes c ON c.id = p.cliente_id
       LEFT JOIN ventas v ON v.pedido_id = p.id
+      " . Cancelacion::join() . "
       LEFT JOIN (SELECT venta_id, SUM(monto) AS pagado FROM pagos GROUP BY venta_id) pg ON pg.venta_id = v.id
       LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
+      LEFT JOIN cotizaciones qp ON qp.id = p.cotizacion_id
       " . (Inventario::hayConsumos()
             ? "LEFT JOIN (SELECT pedido_id, SUM(gramos) AS gramos, SUM(costo) AS costo FROM carrete_consumos WHERE tipo = 'falla' GROUP BY pedido_id) fa ON fa.pedido_id = p.id"
             : "LEFT JOIN (SELECT 0 AS pedido_id, 0 AS gramos, 0 AS costo FROM DUAL WHERE 1 = 0) fa ON fa.pedido_id = p.id") . "
@@ -294,6 +298,146 @@ class PedidosController
 
         $alertas = Inventario::alertasColores([[(int)$k['material_id'], (string)$k['color']]]);
         self::responder(1, 'Falla registrada: ' . number_format($gramos, 0) . ' g · Q' . number_format($costo, 2) . ' se suman al costo de la pieza', ['costo' => $costo, 'alertas' => $alertas]);
+    }
+
+    // ── Cancelar un pedido (el cliente se arrepiente) ────────────────────────
+    // Política: se devuelve el 50% de lo cobrado y el otro 50% se retiene por el trabajo perdido.
+    // Lo gastado en filamento (pieza + fallas) no se recupera: queda como costo de esta pieza.
+
+    // Cifras para mostrar antes de confirmar
+    private static function cifrasCancelacion(Pedido $pedido): array
+    {
+        $v = ActiveRecord::fetchArray('SELECT id, precio_venta, cotizacion_id FROM ventas WHERE pedido_id = ?', [(int)$pedido->id]);
+        $venta = $v[0] ?? null;
+        $pagado = 0.0;
+        $directos = 0.0;
+        if ($venta) {
+            $pagado = (float)ActiveRecord::fetchArray('SELECT COALESCE(SUM(monto), 0) AS t FROM pagos WHERE venta_id = ?', [(int)$venta['id']])[0]['t'];
+            $directos = (float)ActiveRecord::fetchArray('SELECT COALESCE(SUM(monto), 0) AS t FROM gastos WHERE venta_id = ?', [(int)$venta['id']])[0]['t'];
+        }
+
+        // Filamento ya gastado: lo real de los carretes; si la pieza empezó antes de usar carretes, lo estimado de la cotización
+        $material = 0.0;
+        if ($pedido->estado !== 'solicitado') {
+            $filas = Inventario::hayConsumos()
+                ? ActiveRecord::fetchArray('SELECT COUNT(*) AS n, COALESCE(SUM(costo), 0) AS c FROM carrete_consumos WHERE pedido_id = ?', [(int)$pedido->id])
+                : [['n' => 0, 'c' => 0]];
+            if ((int)$filas[0]['n'] > 0) {
+                $material = (float)$filas[0]['c'];
+            } elseif ($venta && $venta['cotizacion_id']) {
+                $material = (float)ActiveRecord::fetchArray('SELECT costo_material AS c FROM cotizaciones WHERE id = ?', [(int)$venta['cotizacion_id']])[0]['c'];
+            }
+        }
+
+        $sugerido = round($pagado * Cancelacion::DEVOLUCION_PCT / 100, 2);
+        return [
+            'venta_id'   => $venta ? (int)$venta['id'] : null,
+            'precio'     => $venta ? round((float)$venta['precio_venta'], 2) : 0,
+            'pagado'     => round($pagado, 2),
+            'material'   => round($material, 2),
+            'directos'   => round($directos, 2),
+            'pct'        => Cancelacion::DEVOLUCION_PCT,
+            'sugerido'   => $sugerido,
+        ];
+    }
+
+    public static function cancelacionAPI(Router $router): void
+    {
+        getHeadersApi();
+        $pedido = Pedido::find((int)($_GET['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        if (!isset(self::ETAPAS[$pedido->estado]) || $pedido->estado === 'entregado') {
+            self::responder(0, 'Solo se puede cancelar un pedido que todavía no se entrega');
+        }
+        self::responder(1, '', ['datos' => self::cifrasCancelacion($pedido)]);
+    }
+
+    // POST: id, devolucion (0..pagado), motivo (mín. 5 letras), fecha (opcional, hoy por defecto)
+    public static function cancelarAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        if (!Cancelacion::hayTabla()) {
+            self::responder(0, 'Falta crear la tabla de cancelaciones (sql/cancelaciones.sql)');
+        }
+        $pedido = Pedido::find((int)($_POST['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        if (!isset(self::ETAPAS[$pedido->estado]) || $pedido->estado === 'entregado') {
+            self::responder(0, 'Solo se puede cancelar un pedido que todavía no se entrega (o que ya está cancelado)');
+        }
+
+        $motivo = trim($_POST['motivo'] ?? '');
+        if (mb_strlen($motivo) < 5) {
+            self::responder(0, 'Escribe el motivo de la cancelación (mínimo 5 letras)');
+        }
+        $fecha = trim($_POST['fecha'] ?? '') ?: date('Y-m-d');
+        $partes = explode('-', $fecha);
+        if (count($partes) !== 3 || !checkdate((int)$partes[1], (int)$partes[2], (int)$partes[0])) {
+            self::responder(0, 'La fecha no es válida');
+        }
+        if ($fecha > date('Y-m-d')) {
+            self::responder(0, 'La fecha de cancelación no puede ser futura');
+        }
+        self::exigirAbierta($fecha);
+
+        $c = self::cifrasCancelacion($pedido);
+        $devolucion = round((float)($_POST['devolucion'] ?? $c['sugerido']), 2);
+        if ($devolucion < 0 || $devolucion > $c['pagado'] + 0.005) {
+            self::responder(0, 'La devolución debe estar entre Q0.00 y lo cobrado (Q' . number_format($c['pagado'], 2) . ')');
+        }
+        if ($c['pagado'] <= 0.005) {
+            $devolucion = 0.0;
+        }
+        $retenido = round($c['pagado'] - $devolucion, 2);
+
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+        try {
+            $up = $db->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND estado = ?");
+            $up->execute([(int)$pedido->id, $pedido->estado]);
+            if ($up->rowCount() !== 1) {
+                throw new \RuntimeException('etapa');
+            }
+
+            // La devolución es un cobro NEGATIVO: así caja, conciliación con el banco y cierres la reflejan sin cambios
+            if ($devolucion > 0.005) {
+                $pago = new Pago([
+                    'venta_id' => (int)$c['venta_id'],
+                    'monto'    => -$devolucion,
+                    'tipo'     => 'otro',
+                    'fecha'    => $fecha,
+                    'notas'    => 'Devolución por cancelación: ' . $motivo,
+                ]);
+                if ($pago->crear()['resultado'] === false) {
+                    throw new \Exception('pago');
+                }
+            }
+
+            $ins = $db->prepare('INSERT INTO cancelaciones (pedido_id, venta_id, etapa, fecha, motivo, pagado, devuelto, retenido, costo_material) VALUES (?,?,?,?,?,?,?,?,?)');
+            $ins->execute([(int)$pedido->id, $c['venta_id'], $pedido->estado, $fecha, mb_substr($motivo, 0, 255), $c['pagado'], $devolucion, $retenido, $c['material']]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            self::responder(0, $e instanceof \RuntimeException
+                ? 'El pedido ya cambió de etapa. Recarga la pantalla'
+                : 'No se pudo cancelar el pedido');
+        }
+
+        $perdida = round($c['material'] + $c['directos'], 2);
+        self::responder(1, 'Pedido cancelado', [
+            'pagado'    => $c['pagado'],
+            'devuelto'  => $devolucion,
+            'retenido'  => $retenido,
+            'material'  => $c['material'],
+            'directos'  => $c['directos'],
+            'resultado' => round($retenido - $perdida, 2),
+        ]);
     }
 
     // Finaliza la venta: el pedido debe estar "listo" y tener venta. Si falta dinero por cobrar,

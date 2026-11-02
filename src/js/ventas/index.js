@@ -31,7 +31,7 @@ function pintar() {
     cuerpo.innerHTML = ventas.map((v) => `
         <tr>
             <td>${fecha(v.fecha_venta)}</td>
-            <td><b>${esc(v.descripcion)}</b></td>
+            <td><b>${esc(v.descripcion)}</b>${v.estado_pedido === 'cancelado' ? ' <span class="hc-chip" style="background:#fde8e8;color:#b42318">Cancelada</span>' : ''}</td>
             <td>${esc(v.cliente)}</td>
             <td class="text-end fw-bold">${Q0(v.precio_venta)}</td>
             <td class="text-end">${Q(v.pagado)}</td>
@@ -49,15 +49,16 @@ async function detalle(id) {
     if (r.codigo !== 1) return error(r);
     const { venta: v, pagos, gastos } = r.datos;
     const saldo = num(v.saldo);
+    const cancelada = v.estado_pedido === 'cancelado';
 
     const filasPagos = pagos.length
         ? pagos.map((p) => `<tr><td>${fecha(p.fecha)}</td><td>${esc(p.tipo)}</td><td class="text-end">${Q(p.monto)}</td>
-            <td class="text-end text-nowrap">${p.comprobante ? `<a class="me-2" href="${BASE}/API/ventas/comprobante?id=${p.id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}<button class="btn btn-sm btn-link p-0" data-edit-pago="${p.id}" title="Editar pago"><i class="bi bi-pencil"></i></button></td></tr>`).join('')
+            <td class="text-end text-nowrap">${p.comprobante ? `<a class="me-2" href="${BASE}/API/ventas/comprobante?id=${p.id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}${cancelada ? '' : `<button class="btn btn-sm btn-link p-0" data-edit-pago="${p.id}" title="Editar pago"><i class="bi bi-pencil"></i></button>`}</td></tr>`).join('')
         : '<tr><td colspan="4" class="hc-ayuda">Sin pagos registrados</td></tr>';
 
     const filasGastos = gastos.length
         ? gastos.map((g) => `<tr><td>${fecha(g.fecha)}</td><td>${esc(g.categoria)}${g.descripcion ? ` · ${esc(g.descripcion)}` : ''}</td><td class="text-end">${Q(g.monto)}</td>
-            <td class="text-end text-nowrap">${g.comprobante ? `<a class="me-2" href="${BASE}/API/gastos/comprobante?id=${g.id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}<button class="btn btn-sm btn-link p-0 me-2" data-edit-gasto="${g.id}" title="Editar gasto"><i class="bi bi-pencil"></i></button></td></tr>`).join('')
+            <td class="text-end text-nowrap">${g.comprobante ? `<a class="me-2" href="${BASE}/API/gastos/comprobante?id=${g.id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}${cancelada ? '' : `<button class="btn btn-sm btn-link p-0 me-2" data-edit-gasto="${g.id}" title="Editar gasto"><i class="bi bi-pencil"></i></button>`}</td></tr>`).join('')
         : '<tr><td colspan="4" class="hc-ayuda">Sin gastos registrados para esta pieza</td></tr>';
 
     const res = await Swal.fire({
@@ -65,6 +66,7 @@ async function detalle(id) {
         width: 720,
         html: `
             <div class="text-start small">
+                ${cancelada ? `<div class="mb-2 p-2 rounded" style="background:#fff4f4;border:1px solid #f1b5b5;color:#b42318"><b>Pedido cancelado${v.fecha_cancelacion ? ' el ' + fecha(v.fecha_cancelacion) : ''}.</b> ${esc(v.motivo_cancelacion || '')}<br>Devuelto al cliente: ${Q(v.devuelto_cancelacion)}. Lo retenido es ingreso del mes de la cancelación.</div>` : ''}
                 <div class="d-flex flex-wrap gap-3 mb-3">
                     <span><b>Cliente:</b> ${esc(v.cliente)}</span>
                     <span><b>Fecha:</b> ${fecha(v.fecha_venta)}</span>
@@ -80,13 +82,14 @@ async function detalle(id) {
                 <table class="table table-sm mb-2"><tbody>
                     <tr><td>Costo estimado (cotización)</td><td class="text-end">${v.costo_estimado === null ? '—' : Q(v.costo_estimado)}</td></tr>
                     <tr><td>Ganancia estimada</td><td class="text-end">${v.ganancia_estimada === null ? '—' : Q(v.ganancia_estimada)}</td></tr>
+                    ${num(v.costo_fallas) > 0 ? `<tr><td class="neg">Filamento perdido en fallas <span class="hc-ayuda">(ya restado de la ganancia real)</span></td><td class="text-end neg">−${Q(v.costo_fallas)}</td></tr>` : ''}
                     <tr><td><b>Ganancia real</b>${num(v.gastos_pendientes) === 1 ? ' <span class="hc-chip">est.</span>' : ''}</td><td class="text-end fw-bold ${signo(v.ganancia_real)}">${Q(v.ganancia_real)} (${v.margen_real_pct === null ? '—' : `${num(v.margen_real_pct)}%`})</td></tr>
                 </tbody></table>
                 ${num(v.gastos_pendientes) === 1 ? '<div class="hc-ayuda mb-2">Esta ganancia aún es estimada: falta pagar la pintora, el envío u otros. Regístralo en Gastos > Pagos pendientes y se vuelve real.</div>' : ''}
-                <button class="btn btn-sm btn-outline-danger" data-del-venta="${v.id}"><i class="bi bi-trash"></i> Eliminar venta</button>
+                ${cancelada ? '' : `<button class="btn btn-sm btn-outline-danger" data-del-venta="${v.id}"><i class="bi bi-trash"></i> Eliminar venta</button>`}
             </div>`,
-        showConfirmButton: saldo > 0,
-        showDenyButton: true,
+        showConfirmButton: saldo > 0 && !cancelada,
+        showDenyButton: !cancelada,
         showCancelButton: true,
         confirmButtonText: 'Registrar pago',
         denyButtonText: 'Agregar gasto',

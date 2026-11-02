@@ -63,5 +63,23 @@ $('btnAlerta').addEventListener('click', async () => {
     cargarReserva();
 });
 
+// ── Datos de la proforma ────────────────────────────────────────────────────
+const PF = { negocio: 'pfNegocio', lema: 'pfLema', contacto: 'pfContacto', incluye: 'pfIncluye', entrega: 'pfEntrega', pago: 'pfPago', condiciones: 'pfCondiciones', cancelacion: 'pfCancelacion', validez: 'pfValidez', anticipo: 'pfAnticipo' };
+
+async function cargarProforma() {
+    const r = await get('proforma/datos');
+    if (r.codigo !== 1) return;
+    Object.entries(PF).forEach(([k, id]) => { $(id).value = r.datos[k] ?? ''; });
+}
+
+$('btnProforma').addEventListener('click', async () => {
+    const datos = {};
+    Object.entries(PF).forEach(([k, id]) => { datos[k] = $(id).value.trim(); });
+    const r = await post('proforma/guardar', datos);
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+});
+
 cargar();
 cargarReserva();
+cargarProforma();

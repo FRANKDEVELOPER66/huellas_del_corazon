@@ -63,12 +63,6 @@ class VentasController
         if ($cotizacionId && !$cotizacion) {
             self::responder(0, 'Cotización no encontrada');
         }
-        if ($cotizacion) {
-            $yaTiene = ActiveRecord::fetchArray('SELECT COUNT(*) AS total FROM ventas WHERE cotizacion_id = ?', [$cotizacionId]);
-            if ((int)($yaTiene[0]['total'] ?? 0) > 0) {
-                self::responder(0, 'Esa cotización ya tiene una venta registrada');
-            }
-        }
 
         $pedidoId = (int)($_POST['pedido_id'] ?? 0);
         $pedido = $pedidoId ? Pedido::find($pedidoId) : null;
@@ -152,6 +146,18 @@ class VentasController
         self::responder(1, 'Venta registrada correctamente', ['id' => $ventaId, 'estado_pedido' => $estadoPedido]);
     }
 
+    // Una venta cuyo pedido fue cancelado queda como historial: no admite cobros, cambios ni borrado.
+    private static function exigirNoCancelada(int $ventaId): void
+    {
+        $r = ActiveRecord::fetchArray(
+            "SELECT COUNT(*) AS total FROM ventas v JOIN pedidos p ON p.id = v.pedido_id WHERE v.id = ? AND p.estado = 'cancelado'",
+            [$ventaId]
+        );
+        if ((int)($r[0]['total'] ?? 0) > 0) {
+            self::responder(0, 'Este pedido fue cancelado: la venta quedó como historial y ya no se puede modificar');
+        }
+    }
+
     // Fecha en que la venta cuenta en los resultados: la de entrega (o la de venta si es una venta antigua sin pedido).
     // Una venta cuyo pedido todavía no se entrega no afecta ningún período: devuelve null.
     private static function fechaContable(int $ventaId): ?string
@@ -176,6 +182,7 @@ class VentasController
             self::responder(0, 'Venta no encontrada');
         }
 
+        self::exigirNoCancelada((int)$venta->id);
         // Una venta ya entregada en un período cerrado no se toca
         self::exigirAbierta(self::fechaContable((int)$venta->id));
         $fechaVentaAntes = (string)$venta->fecha_venta;
@@ -213,6 +220,7 @@ class VentasController
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
+        self::exigirNoCancelada((int)$venta->id);
 
         $pago = new Pago([
             'venta_id' => (int)$venta->id,
@@ -279,6 +287,7 @@ class VentasController
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
+        self::exigirNoCancelada((int)$venta->id);
         self::exigirAbierta((string)$pago->fecha);
 
         // Si la venta ya está entregada (y pagada completa), el monto queda fijo; fecha y comprobante sí se pueden corregir
@@ -333,6 +342,7 @@ class VentasController
         if (!$pago) {
             self::responder(0, 'Pago no encontrado');
         }
+        self::exigirNoCancelada((int)$pago->venta_id);
         self::exigirAbierta((string)$pago->fecha);
 
         $pago->eliminar();
@@ -349,6 +359,7 @@ class VentasController
         if (!$venta) {
             self::responder(0, 'Venta no encontrada');
         }
+        self::exigirNoCancelada((int)$venta->id);
 
         // Si algo de esta venta (cobros, gastos, entrega) está en un período cerrado, no se puede borrar
         $fechas = ActiveRecord::fetchArray(

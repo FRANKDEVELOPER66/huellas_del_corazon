@@ -17,6 +17,7 @@ use Controllers\CajaController;
 use Controllers\EmpaquesController;
 use Controllers\InventarioController;
 use Controllers\CierresController;
+use Controllers\ProformaController;
 
 $router = new Router();
 $router->setBaseURL('/' . $_ENV['APP_NAME']);
@@ -63,6 +64,9 @@ $router->post('/API/pedidos/actualizar',    [PedidosController::class, 'actualiz
 $router->post('/API/pedidos/estado',        [PedidosController::class, 'estadoAPI']);
 $router->post('/API/pedidos/eliminar',      [PedidosController::class, 'eliminarAPI']);
 $router->post('/API/pedidos/finalizar', [PedidosController::class, 'finalizarAPI']);
+$router->get('/API/pedidos/cancelacion', [PedidosController::class, 'cancelacionAPI']);
+$router->post('/API/pedidos/cancelar',   [PedidosController::class, 'cancelarAPI']);
+
 
 // ---- API: gastos ----
 $router->get('/API/gastos/listar',          [GastosController::class, 'listarAPI']);
@@ -143,5 +147,10 @@ $router->get('/API/cierres/preparar',   [CierresController::class, 'prepararAPI'
 $router->post('/API/cierres/cerrar',    [CierresController::class, 'cerrarAPI']);
 $router->post('/API/cierres/reabrir',   [CierresController::class, 'reabrirAPI']);
 $router->get('/API/cierres/evidencia',  [CierresController::class, 'evidenciaAPI']);
+// Agrega arriba:  use Controllers\ProformaController;
+$router->get('/cotizaciones/proforma',  [ProformaController::class, 'documento']);   // página para imprimir (no es /API)
+$router->get('/API/proforma/datos',     [ProformaController::class, 'datosAPI']);
+$router->post('/API/proforma/guardar',  [ProformaController::class, 'guardarAPI']);
+
 
 $router->comprobarRutas();

@@ -90,7 +90,7 @@ class Cierre
         return ActiveRecord::fetchArray(
             "SELECT * FROM (
                 SELECT 'cobro' AS tipo, CONCAT('pg', p.id) AS ref, p.fecha, p.monto AS monto,
-                       CONCAT('Cobro de ', p.tipo, ': ', v.descripcion) AS descripcion
+                       IF(p.monto < 0, CONCAT('Devolución al cliente (cancelación): ', v.descripcion), CONCAT('Cobro de ', p.tipo, ': ', v.descripcion)) AS descripcion
                 FROM pagos p JOIN ventas v ON v.id = p.venta_id
                 WHERE p.fecha <= ?
                 UNION ALL

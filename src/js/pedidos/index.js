@@ -72,7 +72,12 @@ function tarjeta(p) {
     const final = FINALES.includes(p.estado);
     const vencido = p.fecha_entrega && p.fecha_entrega < hoy() && !final;
 
-    const dinero = conVenta
+    const cancelado = p.estado === 'cancelado';
+    const dinero = cancelado
+        ? `<div class="small mt-1" style="color:#b42318"><i class="bi bi-x-circle-fill"></i> Cancelado${p.cancel_fecha ? ' el ' + fecha(p.cancel_fecha) : ''}</div>
+           ${conVenta ? `<div class="small">Devuelto <b>${Q(p.cancel_devuelto)}</b> · Retenido <b class="pos">${Q(p.cancel_retenido)}</b></div>` : ''}
+           ${p.cancel_motivo ? `<div class="hc-ayuda">${esc(p.cancel_motivo)}</div>` : ''}`
+        : conVenta
         ? `<div class="d-flex justify-content-between small mt-1">
                <span>${Q(p.precio_venta)}</span>
                ${debe ? `<span class="neg fw-bold">Debe ${Q(saldo)}</span>` : '<span class="pos"><i class="bi bi-check-circle-fill"></i> Pagado</span>'}
@@ -88,17 +93,18 @@ function tarjeta(p) {
             <div class="hc-ayuda">${esc(p.cliente)}</div>
             ${p.fecha_entrega ? `<div class="small ${vencido ? 'neg fw-bold' : ''}"><i class="bi bi-calendar-event me-1"></i>${fecha(p.fecha_entrega)}${vencido ? ' · atrasado' : ''}</div>` : ''}
             ${dinero}
-            ${avisoPintora(p)}
+            ${cancelado ? '' : avisoPintora(p)}
             ${num(p.falla_g) > 0 ? `<div class="small neg mt-1"><i class="bi bi-x-octagon-fill"></i> Fallas: <b>${gr(p.falla_g)}</b> · ${Q(p.falla_q)} extra</div>` : ''}
             ${p.notas ? `<div class="hc-ayuda mt-1">${esc(p.notas)}</div>` : ''}
             <div class="d-flex gap-1 mt-2">
                 ${final ? '' : `<button class="btn btn-sm btn-outline-dark" data-acc="editar" data-id="${p.id}" title="Editar"><i class="bi bi-pencil"></i></button>`}
                 ${p.estado === 'imprimiendo' && conVenta ? `<button class="btn btn-sm btn-outline-danger" data-acc="falla" data-id="${p.id}" title="La impresión falló: registrar el filamento perdido"><i class="bi bi-x-octagon"></i> Falló</button>` : ''}
-                ${conVenta
+                ${cancelado ? '' : conVenta
                     ? `<button class="btn btn-sm btn-hc ms-auto" data-acc="cobros" data-id="${p.id}"><i class="bi bi-cash-coin"></i> Cobros</button>`
                     : (p.estado === 'cancelado' ? '' : `<button class="btn btn-sm btn-hc ms-auto" data-acc="venta" data-id="${p.id}"><i class="bi bi-receipt"></i> Venta</button>`)}
             </div>
             ${botonEtapa(p)}
+            ${final ? '' : `<button class="btn btn-sm btn-link text-danger p-0 mt-2" data-acc="cancelar" data-id="${p.id}"><i class="bi bi-x-circle"></i> Cancelar pedido</button>`}
         </div>`;
 }
 
@@ -220,9 +226,94 @@ async function falla(p) {
     if (!value) return;
     const res = await post('pedidos/falla', value);
     if (res.codigo !== 1) return error(res);
-    toast.fire({ icon: 'success', title: res.mensaje });
     await cargar();
+    await Swal.fire({
+        icon: 'success',
+        title: 'Falla registrada',
+        html: `<div class="text-start">
+            <p class="mb-2">Se descontaron <b>${num(value.gramos).toLocaleString('es-GT')} g</b> del carrete.</p>
+            <p class="mb-2">Costo de la falla: <b style="color:#b42318">${Q(res.costo)}</b>. Se suma al costo de fabricación de <b>${esc(p.nombre_mascota)}</b>.</p>
+            <p class="mb-0">El precio de venta no cambia: tu <b>ganancia real</b> en esta pieza baja ${Q(res.costo)}. La ves en Ventas, al abrir la pieza.</p>
+        </div>`,
+        confirmButtonText: 'OK, entendido',
+        confirmButtonColor: ORO,
+    });
     avisarFilamento(res.alertas);
+}
+
+// ── Cancelar pedido: el cliente se arrepiente. Se devuelve el 50% de lo cobrado; el resto es por el trabajo perdido ──
+async function cancelar(p) {
+    const r = await get('pedidos/cancelacion', { id: p.id });
+    if (r.codigo !== 1) return error(r);
+    const c = r.datos;
+    const pagado = num(c.pagado);
+    const perdido = num(c.material) + num(c.directos);
+
+    const { value } = await Swal.fire({
+        titleText: `Cancelar “${p.nombre_mascota}”`,
+        width: 540,
+        html: `
+            <div class="text-start">
+                <div class="hc-ayuda mb-2">Esto <b>no se puede deshacer</b>. El pedido queda cancelado y la venta queda como historial.</div>
+                <div class="small mb-2 p-2 rounded" style="background:#f8f5ee">
+                    <div class="d-flex justify-content-between"><span>Precio de la venta</span><b>${Q(c.precio)}</b></div>
+                    <div class="d-flex justify-content-between"><span>Ya cobrado al cliente</span><b>${Q(pagado)}</b></div>
+                    <div class="d-flex justify-content-between"><span>Filamento ya gastado</span><b class="neg">${Q(c.material)}</b></div>
+                    <div class="d-flex justify-content-between"><span>Pagado a pintora / envío</span><b class="neg">${Q(c.directos)}</b></div>
+                </div>
+                ${pagado > 0 ? `
+                <label class="form-label mb-1">Dinero que le devuelves al cliente <span class="hc-ayuda">(política: ${c.pct}% de lo cobrado)</span></label>
+                <input id="cDev" type="number" min="0" max="${pagado}" step="0.01" class="form-control mb-1" value="${num(c.sugerido).toFixed(2)}">
+                <div id="cRes" class="small mb-2"></div>` : '<div class="hc-ayuda mb-2">El cliente no había pagado nada: no hay dinero que devolver.</div>'}
+                <label class="form-label mb-1">Motivo</label>
+                <input id="cMotivo" class="form-control mb-2" maxlength="200" placeholder="Ej. El cliente ya no quiere la figura">
+                <label class="form-label mb-1">Fecha de cancelación</label>
+                <input id="cFecha" type="date" class="form-control" max="${hoy()}" value="${hoy()}">
+            </div>`,
+        didOpen: (pop) => {
+            const refrescar = () => {
+                const el = pop.querySelector('#cDev');
+                if (!el) return;
+                const dev = Math.min(Math.max(parseFloat(el.value) || 0, 0), pagado);
+                const ret = pagado - dev;
+                const res = ret - perdido;
+                pop.querySelector('#cRes').innerHTML = `Te quedas con <b>${Q(ret)}</b> · resultado de esta pieza: <b class="${res >= 0 ? 'pos' : 'neg'}">${res >= 0 ? '+' : ''}${Q(res)}</b>`;
+            };
+            pop.addEventListener('input', refrescar);
+            refrescar();
+        },
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Sí, cancelar pedido',
+        cancelButtonText: 'Volver',
+        confirmButtonColor: '#b42318',
+        preConfirm: () => {
+            const pop = Swal.getPopup();
+            const motivo = pop.querySelector('#cMotivo').value.trim();
+            const el = pop.querySelector('#cDev');
+            const devolucion = el ? parseFloat(el.value) || 0 : 0;
+            if (motivo.length < 5) { Swal.showValidationMessage('Escribe el motivo (mínimo 5 letras)'); return false; }
+            if (devolucion < 0 || devolucion > pagado + 0.005) { Swal.showValidationMessage(`La devolución va de Q0.00 a ${Q(pagado)}`); return false; }
+            return { id: p.id, motivo, devolucion, fecha: pop.querySelector('#cFecha').value };
+        },
+    });
+    if (!value) return;
+    const res = await post('pedidos/cancelar', value);
+    if (res.codigo !== 1) return error(res);
+    await cargar();
+    await Swal.fire({
+        icon: 'success',
+        title: 'Pedido cancelado',
+        html: `<div class="text-start">
+            <p class="mb-1">Cobrado: <b>${Q(res.pagado)}</b></p>
+            <p class="mb-1">Devuelto al cliente: <b>${Q(res.devuelto)}</b> <span class="hc-ayuda">(queda registrado como salida de caja)</span></p>
+            <p class="mb-1">Retenido por trabajo perdido: <b class="pos">${Q(res.retenido)}</b></p>
+            <p class="mb-2">Costos ya gastados: <b class="neg">${Q(num(res.material) + num(res.directos))}</b></p>
+            <p class="mb-0">Resultado de esta pieza: <b class="${res.resultado >= 0 ? 'pos' : 'neg'}">${res.resultado >= 0 ? '+' : ''}${Q(res.resultado)}</b>, en el mes de la cancelación.</p>
+        </div>`,
+        confirmButtonText: 'OK, entendido',
+        confirmButtonColor: ORO,
+    });
 }
 
 // ── Finalizar venta: exige el pago completo y deja el pedido en Entregado ───
@@ -415,7 +506,8 @@ async function registrarVenta(p) {
         html: `
             <div class="text-start">
                 <label class="form-label mb-1">Precio al que vendiste (Q)</label>
-                <input id="vPrecio" type="number" min="0" step="any" class="form-control mb-2">
+                <input id="vPrecio" type="number" min="0" step="any" class="form-control mb-1" value="${num(p.precio_cotizado) > 0 ? num(p.precio_cotizado) : ''}">
+                ${num(p.precio_cotizado) > 0 ? `<div class="hc-ayuda mb-2">Viene de la cotización (${Q(p.precio_cotizado)}). Cámbialo si vendiste a otro precio.</div>` : '<div class="mb-2"></div>'}
                 <label class="form-label mb-1">Anticipo recibido (Q)</label>
                 <input id="vAnticipo" type="number" min="0" step="any" class="form-control mb-2" value="0">
                 <label class="form-label mb-1">Comprobante del anticipo <span class="hc-ayuda">(captura de la transferencia)</span></label>
@@ -480,6 +572,7 @@ $('tablero').addEventListener('click', (e) => {
     if (acc === 'avanzar') avanzar(p);
     if (acc === 'finalizar') finalizar(p);
     if (acc === 'falla') falla(p);
+    if (acc === 'cancelar') cancelar(p);
     if (acc === 'editar') formPedido(p);
     if (acc === 'cobros') cobros(p);
     if (acc === 'venta') registrarVenta(p);
