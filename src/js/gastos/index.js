@@ -3,6 +3,8 @@ import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, 
 
 const BASE = $('appGastos').dataset.base || '';
 const { get, post } = crearApi(BASE);
+const CARRETE_VACIO_G = 250; // peso fijo de un carrete vacío (báscula − 250 g = filamento que queda)
+if ($('lnkMateriales')) $('lnkMateriales').href = `${BASE}/materiales`;
 
 // Qué hace cada tipo de categoría en el estado de resultados
 const AYUDA_TIPO = {
@@ -735,20 +737,24 @@ async function cargarInventario() {
         <div class="table-responsive"><table class="table table-sm align-middle mb-0 hc-tabla-nw" id="tablaCompras">
             <thead><tr><th>Fecha</th><th>Material</th><th class="text-end">Cantidad</th><th class="text-end">Costo por kg</th><th class="text-end">Total</th><th>Origen del dinero</th><th></th></tr></thead>
             <tbody>${filasCompras}</tbody></table></div>`;
+    aplicarFiltroCarretes();
 }
 
 
 // ── Carretes ────────────────────────────────────────────────────────────────
 const COLORES_BASE = ['Negro', 'Blanco', 'Gris', 'Rojo', 'Azul', 'Celeste', 'Verde', 'Verde militar', 'Amarillo', 'Naranja', 'Dorado', 'Plateado', 'Rosado', 'Morado', 'Café', 'Beige', 'Transparente'];
 // Para pintar el puntito del color (lo más específico primero)
-const PUNTOS = [['verde militar', '#4b5320'], ['celeste', '#5bc0eb'], ['dorado', '#d4af37'], ['plateado', '#b8bcc2'], ['negro', '#1f1f1f'], ['blanco', '#f4f4f4'],
+const PUNTOS = [['verde azulado', '#2a9d8f'], ['verde militar', '#4b5320'], ['rojo lava', '#c0392b'], ['ladrillo', '#a0432e'], ['marrón', '#6f4e37'], ['marron', '#6f4e37'], ['pink', '#f48fb1'], ['yellow', '#f4c20d'], ['celeste', '#5bc0eb'], ['dorado', '#d4af37'], ['plateado', '#b8bcc2'], ['negro', '#1f1f1f'], ['blanco', '#f4f4f4'],
     ['gris', '#8a8f98'], ['rojo', '#d62828'], ['azul', '#1d4ed8'], ['verde', '#2e9e4f'], ['amarillo', '#f4c20d'], ['naranja', '#f07b1c'], ['rosa', '#f48fb1'],
     ['morado', '#7048e8'], ['café', '#7b4a2d'], ['cafe', '#7b4a2d'], ['beige', '#e1cfae'], ['transparente', '#dfe7ee']];
-const puntoColor = (color) => {
+const puntoColor = (color, px = 14) => {
     const c = String(color || '').toLowerCase();
     const hit = PUNTOS.find(([k]) => c.includes(k));
-    return `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:-2px;margin-right:6px;border:1px solid #0003;background:${hit ? hit[1] : '#cfd4da'}"></span>`;
+    return `<span style="display:inline-block;width:${px}px;height:${px}px;border-radius:50%;vertical-align:${px > 16 ? -6 : -2}px;margin-right:8px;border:1px solid #0004;background:${hit ? hit[1] : '#cfd4da'}"></span>`;
 };
+// Para buscar sin importar mayúsculas ni acentos
+const plano = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+let filtroCarretes = '';
 const gr = (n) => num(n).toLocaleString('es-GT', { maximumFractionDigits: 0 }) + ' g';
 const colorBarra = (pct) => (pct > 50 ? '#117a43' : pct >= 15 ? '#c98a00' : '#b42318');
 
@@ -768,14 +774,33 @@ function seccionCarretes(d) {
     if (!ks.length) {
         return '<h3 class="h6 mt-3 mb-2"><i class="bi bi-disc me-1"></i>Carretes</h3><div class="hc-ayuda">Aún no registras carretes. Usa <b>“Ya tenía filamento”</b> para los que tienes hoy, o <b>“Comprar filamento”</b> para los nuevos.</div>';
     }
-    const orden = [...ks].sort((a, b) => Number(a.agotado) - Number(b.agotado));
     const vivos = ks.filter((k) => !k.agotado);
     const gramos = vivos.reduce((s, k) => s + num(k.gramos_actuales), 0);
     const valor = vivos.reduce((s, k) => s + num(k.valor), 0);
-    const filas = orden.map((k) => {
+    return `<h3 class="h6 mt-3 mb-2"><i class="bi bi-disc me-1"></i>Carretes <span class="hc-ayuda fw-normal">${vivos.length} con filamento · ${gr(gramos)} · ${Q(valor)}</span></h3>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <div class="input-group" style="max-width:360px">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input id="fCarretes" type="search" class="form-control" placeholder="Buscar color o material (ej. blanco)" value="${esc(filtroCarretes)}" autocomplete="off">
+            </div>
+            <span id="fCarretesN" class="hc-ayuda"></span>
+        </div>
+        <div class="table-responsive"><table class="table table-sm align-middle mb-0 hc-tabla-nw">
+            <thead><tr><th>Color</th><th>Material</th><th>Le queda</th><th class="text-end">Costo nuevo</th><th class="text-end">Valor ahora</th><th>Entrada</th><th></th></tr></thead>
+            <tbody id="tbodyCarretes">${filasCarretes(ks)}</tbody></table></div>
+        <div class="hc-ayuda mt-1">Los gramos bajan solos cuando un pedido pasa a <b>Imprimiendo</b> (con la merma) y cuando registras una impresión fallida en Pedidos. Si lo que marca la báscula es distinto, corrígelo con el medidor.</div>`;
+}
+
+// Filas de la tabla de carretes, aplicando el buscador (color o material)
+function filasCarretes(ks) {
+    const q = plano(filtroCarretes).trim();
+    const lista = ks.filter((k) => !q || plano(k.color).includes(q) || plano(k.material).includes(q));
+    const orden = [...lista].sort((a, b) => Number(a.agotado) - Number(b.agotado));
+    if (!orden.length) return '<tr><td colspan="7" class="hc-ayuda py-3">Ningún carrete coincide con la búsqueda.</td></tr>';
+    return orden.map((k) => {
         const pct = Math.max(0, Math.min(100, (num(k.gramos_actuales) / num(k.peso_inicial_g)) * 100));
         return `<tr class="${k.agotado ? 'text-muted' : ''}">
-            <td>${puntoColor(k.color)}<b>${esc(k.color)}</b></td>
+            <td class="text-nowrap">${puntoColor(k.color, 26)}<b>${esc(k.color)}</b></td>
             <td>${esc(k.material)}</td>
             <td style="min-width:170px">
                 <div class="d-flex justify-content-between"><b style="color:${k.agotado ? '#6c757d' : colorBarra(pct)}">${k.agotado ? 'Agotado' : gr(k.gramos_actuales)}</b><span class="hc-ayuda">de ${gr(k.peso_inicial_g)}</span></div>
@@ -790,11 +815,6 @@ function seccionCarretes(d) {
             </td>
         </tr>`;
     }).join('');
-    return `<h3 class="h6 mt-3 mb-2"><i class="bi bi-disc me-1"></i>Carretes <span class="hc-ayuda fw-normal">${vivos.length} con filamento · ${gr(gramos)} · ${Q(valor)}</span></h3>
-        <div class="table-responsive"><table class="table table-sm align-middle mb-0 hc-tabla-nw">
-            <thead><tr><th>Color</th><th>Material</th><th>Le queda</th><th class="text-end">Costo nuevo</th><th class="text-end">Valor ahora</th><th>Entrada</th><th></th></tr></thead>
-            <tbody>${filas}</tbody></table></div>
-        <div class="hc-ayuda mt-1">Los gramos bajan solos cuando un pedido pasa a <b>Imprimiendo</b> (con la merma) y cuando registras una impresión fallida en Pedidos. Si lo que marca la báscula es distinto, corrígelo con el medidor.</div>`;
 }
 
 // Avisos de poco filamento por color, gramos por color y merma presupuestada contra real
@@ -805,7 +825,7 @@ function bloqueAvisos(d) {
         ? `<div class="mt-3"><div class="hc-ayuda mb-1">Filamento por color <span class="fw-normal">(aviso debajo de ${gr(limite)})</span></div>
             ${(d.colores || []).map((c) => {
                 const poco = num(c.gramos) < limite;
-                return `<span class="hc-chip me-1 mb-1" style="${poco ? 'background:#fde8ee;color:#b0224f' : ''}">${puntoColor(c.color)}${esc(c.color)} <span class="hc-ayuda">${esc(c.material)}</span> <b>${gr(c.gramos)}</b>${c.carretes > 1 ? ` · ${c.carretes} carretes` : ''}</span>`;
+                return `<span class="hc-chip me-1 mb-1" role="button" data-filtro-color="${esc(c.color)}" title="Ver solo este color" style="cursor:pointer;${poco ? 'background:#fde8ee;color:#b0224f' : ''}">${puntoColor(c.color, 20)}${esc(c.color)} <span class="hc-ayuda">${esc(c.material)}</span> <b>${gr(c.gramos)}</b>${c.carretes > 1 ? ` · ${c.carretes} carretes` : ''}</span>`;
             }).join('')}</div>`
         : '';
 
@@ -881,7 +901,7 @@ async function formCarretes(inicial) {
                 ${datalistColores()}
                 ${inicial ? `<div class="hc-ayuda mb-2">Carretes que <b>ya tenías</b> antes de usar la app. No salen de la caja. Un carrete nuevo ya lleva 1,000 g; si está usado, <b>pésalo con la báscula</b> y la app le resta el carrete vacío.</div>
                     <div class="row g-2 mb-2 align-items-end">
-                        <div class="col-4"><label class="form-label mb-1">Carrete vacío pesa (g)</label><input id="cVacio" type="number" min="0" step="any" class="form-control" value="250"></div>
+                        <div class="col-4"><label class="form-label mb-1">Carrete vacío pesa (g)</label><input id="cVacio" type="number" class="form-control bg-light" value="${CARRETE_VACIO_G}" readonly tabindex="-1" title="Fijo: peso de un carrete vacío"></div>
                         <div class="col-8 hc-ayuda">Se usa para calcular lo que le queda: báscula − carrete vacío.</div>
                     </div>` : `
                     <label class="form-label mb-1">Material</label>
@@ -1034,7 +1054,7 @@ async function ajustarPeso(k) {
                 <div class="hc-ayuda mb-2">Hoy tiene registrado <b>${gr(k.gramos_actuales)}</b> de ${gr(k.peso_inicial_g)}. Pésalo con la báscula y corrige.</div>
                 <div class="row g-2 mb-2 align-items-end">
                     <div class="col-4"><label class="form-label mb-1">Báscula (g)</label><input id="aBascula" type="number" min="0" step="any" class="form-control" placeholder="opcional"></div>
-                    <div class="col-4"><label class="form-label mb-1">Carrete vacío (g)</label><input id="aVacio" type="number" min="0" step="any" class="form-control" value="250"></div>
+                    <div class="col-4"><label class="form-label mb-1">Carrete vacío (g)</label><input id="aVacio" type="number" class="form-control bg-light" value="${CARRETE_VACIO_G}" readonly tabindex="-1" title="Fijo: peso de un carrete vacío"></div>
                     <div class="col-4"><label class="form-label mb-1">Le queda (g)</label><input id="aGramos" type="number" min="0" step="any" class="form-control" value="${num(k.gramos_actuales)}"></div>
                 </div>
                 <label class="form-label mb-1">Motivo</label>
@@ -1198,7 +1218,33 @@ async function formCompra(c = null, inicial = false) {
 
 $('btnComprar').addEventListener('click', () => formCompra());
 $('btnInicial').addEventListener('click', () => formCompra(null, true));
+// Buscador de carretes: solo repinta las filas, así el cursor no se pierde
+function aplicarFiltroCarretes() {
+    const tb = document.getElementById('tbodyCarretes');
+    if (!tb) return;
+    tb.innerHTML = filasCarretes(inventario.carretes || []);
+    const n = document.getElementById('fCarretesN');
+    if (n) {
+        const q = plano(filtroCarretes).trim();
+        const total = (inventario.carretes || []).filter((k) => !q || plano(k.color).includes(q) || plano(k.material).includes(q));
+        const vivos = total.filter((k) => !k.agotado);
+        n.innerHTML = q ? `${total.length} carrete${total.length === 1 ? '' : 's'} · <b>${gr(vivos.reduce((s, k) => s + num(k.gramos_actuales), 0))}</b> disponibles` : '';
+    }
+}
+$('inventario').addEventListener('input', (e) => {
+    if (e.target.id !== 'fCarretes') return;
+    filtroCarretes = e.target.value;
+    aplicarFiltroCarretes();
+});
 $('inventario').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-filtro-color]');
+    if (chip) {
+        filtroCarretes = chip.dataset.filtroColor;
+        const inp = document.getElementById('fCarretes');
+        if (inp) { inp.value = filtroCarretes; inp.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+        aplicarFiltroCarretes();
+        return;
+    }
     const ed = e.target.closest('[data-editar-compra]');
     const hist = e.target.closest('[data-hist-compra]');
     const peso = e.target.closest('[data-peso-carrete]');

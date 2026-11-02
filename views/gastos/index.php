@@ -107,6 +107,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
             <h2 class="mb-0"><i class="bi bi-box-seam me-2"></i>Inventario de filamento <span class="hc-ayuda fw-normal">en kg y en dinero</span></h2>
             <div class="d-flex gap-2">
                 <button class="btn btn-sm btn-hc" id="btnComprar"><i class="bi bi-cart-plus me-1"></i>Comprar filamento</button>
+                <a class="btn btn-sm btn-outline-dark" id="lnkMateriales" href="#" title="Agregar o editar materiales y su costo por kilo"><i class="bi bi-layers me-1"></i>Agregar Materiales de Filamentos</a>
                 <button class="btn btn-sm btn-outline-dark" id="btnInicial" title="Filamento que ya tenías antes de usar la app"><i class="bi bi-box-arrow-in-down me-1"></i>Ya tenía filamento</button>
             </div>
         </div>
