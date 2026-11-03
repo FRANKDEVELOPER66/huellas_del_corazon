@@ -67,18 +67,18 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
         z-index: 1030;
         background: #1c1c1c;
         color: #fff;
-        padding: .6rem 1rem;
+        padding: 1rem 1.5rem;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         justify-content: center;
-        gap: .5rem 1.6rem;
+        gap: .6rem 3rem;
         box-shadow: 0 -4px 14px rgba(0,0,0,.25);
     }
     .barra-total.d-none { display: none; }
-    .barra-total small { display: block; opacity: .7; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
-    .barra-total b { font-size: 1.15rem; }
-    .barra-total .bt-total b { font-size: 1.5rem; color: #f6c33b; }
+    .barra-total small { display: block; opacity: .75; font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; }
+    .barra-total b { font-size: 1.9rem; line-height: 1.15; }
+    .barra-total .bt-total b { font-size: 2.6rem; color: #f6c33b; }
     .barra-total .bt-gan b { color: #6fd08c; }
 
     .empaque-op {
@@ -210,47 +210,57 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
     .hc-trio {
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
-        gap: .5rem;
-        margin: .5rem 0 .9rem;
+        gap: 1rem;
+        margin: .6rem 0 1rem;
+        background: #1c1c1c;
+        border-radius: 12px;
+        padding: 1.1rem 1rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,.18);
     }
 
     .hc-dato {
-        background: var(--hc-gris);
-        border: 1px solid var(--hc-borde);
-        border-radius: 10px;
-        padding: .5rem .4rem;
         text-align: center;
+        background: none;
+        border: 0;
     }
 
     .hc-dato span {
         display: block;
-        font-size: .68rem;
+        font-size: .8rem;
         text-transform: uppercase;
-        letter-spacing: .4px;
-        color: #666;
+        letter-spacing: .06em;
+        color: rgba(255,255,255,.75);
     }
 
     .hc-dato b {
-        font-size: 1.1rem;
+        font-size: 1.7rem;
+        line-height: 1.2;
+        color: #fff;
     }
 
-    .hc-dato.hc-ganancia {
-        background: #e8f6ee;
-        border-color: #7cc59b;
+    /* El total a cobrar, el dato principal */
+    .hc-dato:last-child b {
+        font-size: 2.2rem;
+        color: #f6c33b;
     }
 
     .hc-dato.hc-ganancia b {
-        font-size: 1.7rem;
-        color: #117a43;
-    }
-
-    .hc-dato.hc-ganancia.neg {
-        background: #fdecea;
-        border-color: #e6a19b;
+        font-size: 1.9rem;
+        color: #6fd08c;
     }
 
     .hc-dato.hc-ganancia.neg b {
-        color: #b42318;
+        color: #ff7a70;
+    }
+
+    @media (max-width: 575px) {
+        .hc-trio { gap: .4rem; padding: .8rem .5rem; }
+        .hc-dato span { font-size: .62rem; }
+        .hc-dato b, .hc-dato.hc-ganancia b { font-size: 1.2rem; }
+        .hc-dato:last-child b { font-size: 1.5rem; }
+        .barra-total { gap: .4rem 1.2rem; padding: .7rem 1rem; }
+        .barra-total b { font-size: 1.3rem; }
+        .barra-total .bt-total b { font-size: 1.8rem; }
     }
 </style>
 
@@ -267,6 +277,18 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
         <!-- ── Datos de la pieza ───────────────────────────────────────────── -->
         <div class="col-lg-7">
             <div class="hc-card mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <h2 class="mb-0"><i class="bi bi-layers me-2"></i>Partes de la impresión</h2>
+                    <button type="button" class="btn btn-sm btn-outline-dark" id="btnAgregarParte"><i class="bi bi-plus-lg"></i> Agregar parte</button>
+                </div>
+                <p class="hc-ayuda">Una fila por cada placa que imprimes, con los gramos y el tiempo que marca Bambu Studio.</p>
+                <div class="parte-fila d-none d-md-grid hc-ayuda fw-bold">
+                    <span>Nombre</span><span>Material</span><span>Color</span><span>Gramos</span><span>Horas</span><span>Min</span><span></span>
+                </div>
+                <div id="partes"></div>
+            </div>
+
+            <div class="hc-card">
                 <h2><i class="bi bi-tag me-2"></i>Datos de la pieza</h2>
                 <div class="row g-2">
                     <div class="col-md-8">
@@ -317,19 +339,6 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
                     </div>
                     <p class="hc-ayuda mt-1 mb-0">Una figura pequeña no necesita la misma caja que un set de varias piezas. Los empaques se administran en Catálogos &gt; Empaques.</p>
                 </div>
-            </div>
-
-            <!-- ── Partes ─────────────────────────────────────────────────── -->
-            <div class="hc-card">
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                    <h2 class="mb-0"><i class="bi bi-layers me-2"></i>Partes de la impresión</h2>
-                    <button type="button" class="btn btn-sm btn-outline-dark" id="btnAgregarParte"><i class="bi bi-plus-lg"></i> Agregar parte</button>
-                </div>
-                <p class="hc-ayuda">Una fila por cada placa que imprimes, con los gramos y el tiempo que marca Bambu Studio.</p>
-                <div class="parte-fila d-none d-md-grid hc-ayuda fw-bold">
-                    <span>Nombre</span><span>Material</span><span>Color</span><span>Gramos</span><span>Horas</span><span>Min</span><span></span>
-                </div>
-                <div id="partes"></div>
             </div>
         </div>
 
