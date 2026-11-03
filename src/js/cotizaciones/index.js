@@ -307,6 +307,7 @@ function limpiar() {
     agregarParte();
     turno++;
     $('resultado').innerHTML = PLACEHOLDER_RESULTADO;
+    actualizarBarra(null);
     liberarGuardar();
 }
 
