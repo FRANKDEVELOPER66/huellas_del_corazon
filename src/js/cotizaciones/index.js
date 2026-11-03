@@ -218,6 +218,7 @@ async function calcular() {
     const miTurno = ++turno;
     if (!leerPartes().length) {
         $('resultado').innerHTML = PLACEHOLDER_RESULTADO;
+        actualizarBarra(null);
         return;
     }
 
@@ -226,6 +227,7 @@ async function calcular() {
 
     if (r.codigo !== 1) {
         $('resultado').innerHTML = `<div class="alert alert-warning mb-0">${esc(r.mensaje)}</div>`;
+        actualizarBarra(null);
         return;
     }
     pintar(r);
@@ -253,16 +255,38 @@ const filasCostos = (d) => [
 ].map(([t, v]) => `<tr><td>${t}</td><td>${Q(v)}</td></tr>`).join('')
     + `<tr class="total"><td>Costo de fabricación</td><td>${Q(d.costo_total)}</td></tr>`;
 
+// Barra fija con el total: solo se ve cuando el Resultado no está a la vista
+let observadorTrio = null;
+function actualizarBarra(d) {
+    const barra = $('barraTotal');
+    if (!barra) return;
+    if (observadorTrio) observadorTrio.disconnect();
+    if (!d) { barra.classList.add('d-none'); return; }
+    barra.innerHTML = `
+        <div><small>Costo de fabricación</small><b>${Q(d.costo_total)}</b></div>
+        <div class="bt-gan"><small>Tu ganancia</small><b>${Q(d.ganancia)}</b></div>
+        <div class="bt-total"><small>Total a cobrar</small><b>${Q0(d.precio_sugerido)}</b></div>
+        <div><small>Margen</small><b>${d.margen_pct_usado}%</b></div>`;
+    const trioEl = document.querySelector('#resultado .hc-trio');
+    if (!trioEl || !('IntersectionObserver' in window)) { barra.classList.add('d-none'); return; }
+    observadorTrio = new IntersectionObserver(([e]) => barra.classList.toggle('d-none', e.isIntersecting));
+    observadorTrio.observe(trioEl);
+}
+
 function pintar({ datos: d, alternativas }) {
     $('resultado').innerHTML = `
         <div class="hc-resumen">${d.total_gramos} g · ${tiempo(d.total_minutos)} de impresión · margen ${d.margen_pct_usado}%</div>
         ${trio(d.costo_total, d.ganancia, d.precio_sugerido)}
         <table class="hc-tabla">${filasCostos(d)}</table>
-        <div class="hc-ayuda mt-3">Con otro margen, el total sería:</div>
+        <div class="hc-ayuda mt-3">Con otro margen, el total sería (toca uno para usarlo):</div>
         <div class="hc-chips">
-            ${Object.entries(alternativas).map(([mg, p]) => `<span class="hc-chip">Margen ${mg}%: <b>${Q0(p)}</b></span>`).join('')}
+            ${Object.entries(alternativas).map(([mg, p]) => {
+                const activo = Number(mg) === Number(d.margen_pct_usado);
+                return `<button type="button" class="hc-chip border-0" data-margen="${mg}" style="cursor:pointer;${activo ? 'background:#c99a14;color:#fff' : ''}" title="Usar margen ${mg}%">Margen ${mg}%: <b>${Q0(p)}</b></button>`;
+            }).join('')}
         </div>`;
 
+    actualizarBarra(d);
     $('costoPintura').placeholder = $('pintorId').value && $('altoCm').value ? `Auto: ${Q(d.costo_pintura)}` : 'Monto que cobra';
 }
 
@@ -382,13 +406,29 @@ async function nuevoCliente() {
 }
 
 // ── Historial ───────────────────────────────────────────────────────────────
+let historial = [];
+const plano = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
 async function cargarHistorial() {
     const r = await get('cotizaciones/listar');
-    const filas = r.datos || [];
-    const cuerpo = document.querySelector('#tablaCotizaciones tbody');
+    historial = r.datos || [];
+    pintarHistorial();
+}
 
-    if (!filas.length) {
+// Pinta la tabla aplicando el buscador (pieza, cliente o pintor; sin importar mayúsculas ni acentos)
+function pintarHistorial() {
+    const cuerpo = document.querySelector('#tablaCotizaciones tbody');
+    const q = plano($('buscaCot')?.value).trim();
+    const filas = q ? historial.filter((c) => plano(`${c.nombre_pieza} ${c.cliente || ''} ${c.pintor || ''}`).includes(q)) : historial;
+    const n = $('buscaCotN');
+    if (n) n.textContent = q ? `${filas.length} de ${historial.length}` : '';
+
+    if (!historial.length) {
         cuerpo.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Aún no hay cotizaciones.</td></tr>';
+        return;
+    }
+    if (!filas.length) {
+        cuerpo.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Ninguna cotización coincide con la búsqueda.</td></tr>';
         return;
     }
 
@@ -413,6 +453,15 @@ async function cargarHistorial() {
         </tr>`;
     }).join('');
 }
+
+document.addEventListener('input', (e) => { if (e.target.id === 'buscaCot') pintarHistorial(); });
+// Los botones de margen del Resultado ponen ese margen y recalculan
+document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-margen]');
+    if (!b) return;
+    $('margenPct').value = b.dataset.margen;
+    programarCalculo();
+});
 
 async function eliminar(id) {
     const { isConfirmed } = await Swal.fire({

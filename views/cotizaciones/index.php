@@ -60,6 +60,27 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
         top: 1rem;
     }
 
+    /* Barra fija con el total: aparece cuando el Resultado queda fuera de la pantalla (al llenar las partes abajo) */
+    .barra-total {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 1030;
+        background: #1c1c1c;
+        color: #fff;
+        padding: .6rem 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: .5rem 1.6rem;
+        box-shadow: 0 -4px 14px rgba(0,0,0,.25);
+    }
+    .barra-total.d-none { display: none; }
+    .barra-total small { display: block; opacity: .7; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+    .barra-total b { font-size: 1.15rem; }
+    .barra-total .bt-total b { font-size: 1.5rem; color: #f6c33b; }
+    .barra-total .bt-gan b { color: #6fd08c; }
+
     .empaque-op {
         cursor: pointer;
         user-select: none;
@@ -329,9 +350,20 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
         </div>
     </div>
 
+    <div id="barraTotal" class="barra-total d-none" aria-live="polite"></div>
+
     <!-- ── Historial ──────────────────────────────────────────────────────── -->
     <div class="hc-card mt-3">
-        <h2><i class="bi bi-clock-history me-2"></i>Cotizaciones guardadas</h2>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <h2 class="mb-0"><i class="bi bi-clock-history me-2"></i>Cotizaciones guardadas</h2>
+            <div class="d-flex align-items-center gap-2">
+                <span id="buscaCotN" class="hc-ayuda"></span>
+                <div class="input-group" style="width:340px;max-width:100%">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input id="buscaCot" type="search" class="form-control" placeholder="Buscar pieza, cliente o pintor" autocomplete="off">
+                </div>
+            </div>
+        </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0" id="tablaCotizaciones">
                 <thead>
