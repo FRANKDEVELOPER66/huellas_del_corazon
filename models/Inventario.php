@@ -196,9 +196,17 @@ class Inventario
         return $filas;
     }
 
-    // Costo por kg para cotizar un material de un color: lo que cuestan los carretes que tienes de ese color;
-    // si no hay con filamento, el último carrete que registraste de ese color; si no, el costo general del material.
+    // Costo por kg para cotizar un material de un color.
+    // Se cotiza con el MAYOR entre el costo de referencia del material (el que fijas en Materiales) y lo que costó el carrete real de ese color:
+    //  · una oferta (carrete más barato que la referencia) no baja el precio al cliente: la diferencia es ganancia tuya;
+    //  · un carrete más caro que la referencia (ASA+, o subió el precio) sube la cotización, así no pierdes dinero.
     public static function costoKg(int $materialId, ?string $color, float $costoMaterial): float
+    {
+        return max($costoMaterial, self::costoKgCarrete($materialId, $color, $costoMaterial));
+    }
+
+    // Lo que cuestan los carretes de ese color: los que tienes con filamento; si no hay, el último que registraste; si no, el costo del material
+    public static function costoKgCarrete(int $materialId, ?string $color, float $costoMaterial): float
     {
         $color = trim((string) $color);
         if ($color === '' || !self::hayCarretes()) {

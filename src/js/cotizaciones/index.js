@@ -134,12 +134,15 @@ function agregarParte() {
 
 // Colores que tienes de ese material, con lo que queda y lo que cuesta por kg
 const gr = (n) => Number(n || 0).toLocaleString('es-GT', { maximumFractionDigits: 0 }) + ' g';
+// Con qué costo por kg se cotiza: el mayor entre la referencia del material (Materiales) y lo que costó el carrete real
+const refMaterial = (matId) => Number((materiales.find((m) => String(m.id) === String(matId)) || {}).costo_kg || 0);
+const cotizaA = (matId, c) => Math.max(refMaterial(matId), Number(c.costo_kg || 0));
 function llenarColores(fila, elegido = '') {
     const mat = fila.querySelector('.p-material').value;
     const lista = colores.filter((c) => String(c.material_id) === String(mat));
     const sel = fila.querySelector('.p-color');
     sel.innerHTML = lista.length
-        ? `<option value="">Elige color…</option>` + lista.map((c) => `<option value="${esc(c.color)}" ${c.color === elegido ? 'selected' : ''}>${esc(c.color)} · ${gr(c.gramos)} · ${Q0(c.costo_kg)}</option>`).join('')
+        ? `<option value="">Elige color…</option>` + lista.map((c) => `<option value="${esc(c.color)}" ${c.color === elegido ? 'selected' : ''}>${esc(c.color)} · ${gr(c.gramos)} · cotiza a ${Q0(cotizaA(mat, c))}/kg</option>`).join('')
         : `<option value="">Sin carretes de este material: regístralos en Gastos &gt; Inventario</option>`;
     avisoColor(fila);
 }
@@ -153,7 +156,8 @@ function avisoColor(fila) {
     if (c && gramos > Number(c.gramos)) {
         aviso.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> De ${esc(c.color)} solo quedan ${gr(c.gramos)} y esta parte pide ${gr(gramos)} (sin contar la merma). Tendrás que comprar más antes de imprimir.</span>`;
     } else if (c) {
-        aviso.innerHTML = `<i class="bi bi-disc"></i> ${esc(c.color)}: ${Q(c.costo_kg)} por kg · quedan ${gr(c.gramos)}`;
+        const mat = fila.querySelector('.p-material').value;
+        aviso.innerHTML = `<i class="bi bi-disc"></i> ${esc(c.color)}: te costó ${Q(c.costo_kg)}/kg · se cotiza a <b>${Q(cotizaA(mat, c))}/kg</b> (${cotizaA(mat, c) > Number(c.costo_kg) ? 'referencia del material' : 'costo real'}) · quedan ${gr(c.gramos)}`;
     } else {
         aviso.innerHTML = '';
     }
