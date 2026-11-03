@@ -133,7 +133,7 @@ class ProformaController
     .cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 3px solid var(--oro); padding-bottom: 1rem; }
     .marca { display: flex; gap: .8rem; align-items: center; }
     .logo-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; }
-    .logo { height: 112px; width: auto; max-width: 280px; object-fit: contain; display: block; }
+    .logo { height: 300px; width: auto; max-width: 280px; object-fit: contain; display: block; }
     .lemas p { margin: 0; color: var(--suave); font-size: .8rem; line-height: 1.35; }
     .alt { display: none; gap: .8rem; align-items: center; }
     .marca svg { width: 54px; height: 54px; flex: none; }
