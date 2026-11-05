@@ -47,6 +47,9 @@ $activo = fn(string $ruta): string => $rutaActual === $ruta ? 'active' : '';
                         <a class="nav-link <?= $activo('/') ?>" aria-current="page" href="<?= $base ?>/"><i class="bi bi-house-fill me-2"></i>Inicio</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link <?= $activo('/recordatorios') ?>" href="<?= $base ?>/recordatorios"><i class="bi bi-journal-check me-2"></i>Recordatorios</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link <?= $activo('/cotizaciones') ?>" href="<?= $base ?>/cotizaciones"><i class="bi bi-calculator-fill me-2"></i>Cotizar</a>
                     </li>
                     <li class="nav-item">

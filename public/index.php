@@ -19,6 +19,7 @@ use Controllers\InventarioController;
 use Controllers\CierresController;
 use Controllers\ProformaController;
 use Controllers\AlertasController;
+use Controllers\RecordatoriosController;
 
 $router = new Router();
 $router->setBaseURL('/' . $_ENV['APP_NAME']);
@@ -156,6 +157,15 @@ $router->get('/API/proforma/datos',     [ProformaController::class, 'datosAPI'])
 $router->post('/API/proforma/guardar',  [ProformaController::class, 'guardarAPI']);
 //SISTEMA DE ALERTAS
 $router->get('/API/alertas', [AlertasController::class, 'listarAPI']);
+
+//Recordatorios
+$router->get('/recordatorios',                  [RecordatoriosController::class, 'index']);
+$router->get('/API/recordatorios/listar',       [RecordatoriosController::class, 'listarAPI']);
+$router->post('/API/recordatorios/crear',       [RecordatoriosController::class, 'crearAPI']);
+$router->post('/API/recordatorios/actualizar',  [RecordatoriosController::class, 'actualizarAPI']);
+$router->post('/API/recordatorios/hecho',       [RecordatoriosController::class, 'hechoAPI']);
+$router->post('/API/recordatorios/eliminar',    [RecordatoriosController::class, 'eliminarAPI']);
+
 
 
 $router->comprobarRutas();

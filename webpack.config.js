@@ -15,6 +15,7 @@ module.exports = {
     'js/configuracion/index': './src/js/configuracion/index.js',
     'js/pedidos/index': './src/js/pedidos/index.js',
     'js/empaques/index': './src/js/empaques/index.js',
+    'js/recordatorios/index': './src/js/recordatorios/index.js',
   },
   output: {
     filename: '[name].js',

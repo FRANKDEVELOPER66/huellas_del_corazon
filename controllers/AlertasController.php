@@ -86,6 +86,35 @@ class AlertasController
             }
         }
 
+        // 4) Recordatorios de trabajo: los urgentes, los vencidos y los que vencen hoy o mañana
+        if (RecordatoriosController::hayTabla()) {
+            $tipos = ['material' => 'Comprar material', 'diseno' => 'Diseño / STL', 'cliente' => 'Cliente', 'pintura' => 'Pintura', 'envio' => 'Envío', 'otro' => 'Otro'];
+            $recs = ActiveRecord::fetchArray(
+                "SELECT r.id, r.texto, r.tipo, r.prioridad, r.fecha_limite, c.nombre AS cliente, q.nombre_pieza AS cotizacion,
+                        DATEDIFF(r.fecha_limite, CURDATE()) AS dias_para
+                 FROM recordatorios r
+                 LEFT JOIN clientes c ON c.id = r.cliente_id
+                 LEFT JOIN cotizaciones q ON q.id = r.cotizacion_id
+                 WHERE r.estado = 'pendiente'
+                   AND (r.prioridad = 'urgente' OR (r.fecha_limite IS NOT NULL AND r.fecha_limite <= DATE_ADD(CURDATE(), INTERVAL 1 DAY)))
+                 ORDER BY r.fecha_limite IS NULL, r.fecha_limite, r.id"
+            );
+            foreach ($recs as $r) {
+                $dias = $r['dias_para'] === null ? null : (int) $r['dias_para'];
+                $cuando = $dias === null ? '' : ($dias < 0 ? ' · venció hace ' . abs($dias) . ($dias === -1 ? ' día' : ' días') : ($dias === 0 ? ' · vence hoy' : ' · vence mañana'));
+                $alertas[] = [
+                    'tipo'    => 'recordatorio',
+                    'nivel'   => ($r['prioridad'] === 'urgente' || ($dias !== null && $dias <= 0)) ? 'alta' : 'media',
+                    'icono'   => 'bi-journal-check',
+                    'titulo'  => $r['texto'],
+                    'detalle' => ($tipos[$r['tipo']] ?? 'Recordatorio') . ($r['cotizacion'] ? ' · ' . $r['cotizacion'] : ($r['cliente'] ? ' · ' . $r['cliente'] : '')) . $cuando,
+                    'monto'   => null,
+                    'url'     => '/recordatorios',
+                    'orden'   => ($dias !== null && $dias < 0) ? 1 : 2,
+                ];
+            }
+        }
+
         // Pedidos en curso y en qué etapa van (para el botón de pedidos junto a la campana)
         $orden = ['solicitado' => 1, 'imprimiendo' => 2, 'impreso' => 3, 'pintando' => 4, 'listo' => 5];
         $pedidos = [];
