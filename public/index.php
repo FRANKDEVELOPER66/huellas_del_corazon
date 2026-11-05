@@ -18,6 +18,7 @@ use Controllers\EmpaquesController;
 use Controllers\InventarioController;
 use Controllers\CierresController;
 use Controllers\ProformaController;
+use Controllers\AlertasController;
 
 $router = new Router();
 $router->setBaseURL('/' . $_ENV['APP_NAME']);
@@ -153,6 +154,8 @@ $router->get('/API/cierres/evidencia',  [CierresController::class, 'evidenciaAPI
 $router->get('/cotizaciones/proforma',  [ProformaController::class, 'documento']);   // página para imprimir (no es /API)
 $router->get('/API/proforma/datos',     [ProformaController::class, 'datosAPI']);
 $router->post('/API/proforma/guardar',  [ProformaController::class, 'guardarAPI']);
+//SISTEMA DE ALERTAS
+$router->get('/API/alertas', [AlertasController::class, 'listarAPI']);
 
 
 $router->comprobarRutas();

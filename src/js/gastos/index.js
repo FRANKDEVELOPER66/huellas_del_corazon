@@ -24,14 +24,25 @@ let pendientesPintora = [];
 let cajaActual = null;
 let inventario = { materiales: [], compras: [] };
 
+let irAlHashHecho = false;
+
 async function cargar() {
-    cargarCaja();
+    const cajaP = cargarCaja();
     if (VISTA === 'inventario') {
         cargarInventario();
         return;
     }
     cargarFranjaInventario();
-    cargarPintora();
+    const pintoraP = cargarPintora();
+
+    // Si llegaste desde un aviso de la campana (…/gastos#pagos-pendientes), baja a esa sección cuando ya cargó todo
+    if (location.hash && !irAlHashHecho) {
+        irAlHashHecho = true;
+        Promise.all([cajaP, pintoraP]).then(() => setTimeout(() => {
+            const el = document.getElementById(location.hash.slice(1));
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 150));
+    }
     const mes = $('mes') ? $('mes').value : '';
     const r = await get('gastos/listar', mes ? { mes } : {});
     gastos = r.datos || [];

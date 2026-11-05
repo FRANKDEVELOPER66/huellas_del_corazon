@@ -76,7 +76,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
         </div>
     </div>
 
-    <div class="hc-card mb-3">
+    <div class="hc-card mb-3" id="pagos-pendientes" style="scroll-margin-top:90px">
         <h2><i class="bi bi-palette me-2"></i>Pagos pendientes de las piezas <span class="hc-ayuda fw-normal">pintora · envíos · otros insumos</span></h2>
         <div id="pintora"></div>
     </div>
