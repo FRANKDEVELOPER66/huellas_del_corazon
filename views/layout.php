@@ -5,6 +5,7 @@ $activo = fn(string $ruta): string => $rutaActual === $ruta ? 'active' : '';
 ?>
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -52,10 +53,13 @@ $activo = fn(string $ruta): string => $rutaActual === $ruta ? 'active' : '';
                         <a class="nav-link <?= $activo('/pedidos') ?>" href="<?= $base ?>/pedidos"><i class="bi bi-box-seam me-2"></i>Pedidos</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link <?= $activo('/inventario') ?>" href="<?= $base ?>/inventario"><i class="bi bi-hypnotize"></i> Inventario</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link <?= $activo('/ventas') ?>" href="<?= $base ?>/ventas"><i class="bi bi-cash-coin me-2"></i>Ventas</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link <?= $activo('/gastos') ?>" href="<?= $base ?>/gastos"><i class="bi bi-receipt me-2"></i>Gastos</a>
+                        <a class="nav-link <?= $activo('/gastos') ?>" href="<?= $base ?>/gastos"><i class="bi bi-receipt me-2"></i>Caja y Gastos</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link <?= $activo('/dashboard') ?>" href="<?= $base ?>/dashboard"><i class="bi bi-graph-up-arrow me-2"></i>Balance</a>
@@ -94,7 +98,7 @@ $activo = fn(string $ruta): string => $rutaActual === $ruta ? 'active' : '';
         <div class="row justify-content-center text-center">
             <div class="col-12">
                 <p style="font-size:xx-small; font-weight: bold;">
-                    Comando de Informática y Tecnología, <?= date('Y') ?> &copy;
+                    Frankd Development, <?= date('Y') ?> &copy;
                 </p>
             </div>
         </div>

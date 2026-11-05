@@ -17,7 +17,7 @@ class ProformaController
         'negocio'     => ['Huellas del Corazón', 80],
         'lema'        => ['Figuras personalizadas impresas en 3D y pintadas a mano', 120],
         'contacto'    => ['', 160],
-        'incluye'     => ['Impresión 3D, pintado a mano y empaque', 200],
+        'incluye'     => ['Impresión 3D y empaque', 200],
         'entrega'     => ['15 días hábiles (de lunes a viernes) a partir de recibir el anticipo', 160],
         'pago'        => ['Depósito o transferencia bancaria. Los datos de la cuenta se envían por mensaje.', 255],
         'condiciones' => ['Pieza personalizada: una vez iniciada la impresión no se aceptan cambios.', 255],

@@ -308,6 +308,7 @@ function limpiar() {
     turno++;
     $('resultado').innerHTML = PLACEHOLDER_RESULTADO;
     actualizarBarra(null);
+    salirEdicion();
     liberarGuardar();
 }
 
@@ -325,6 +326,75 @@ function liberarGuardar() {
     guardada = false;
     $('btnGuardar').disabled = false;
     $('btnGuardar').innerHTML = '<i class="bi bi-save me-1"></i>Guardar cotización';
+}
+
+// ── Editar una cotización guardada ──────────────────────────────────────────
+let editandoId = null;
+
+function salirEdicion() {
+    editandoId = null;
+    const av = $('avisoEdicion');
+    if (av) av.classList.add('d-none');
+    if (!guardada) $('btnGuardar').innerHTML = '<i class="bi bi-save me-1"></i>Guardar cotización';
+}
+
+function entrarEdicion(nombre, copia = false) {
+    $('avisoEdicion').innerHTML = copia
+        ? `<i class="bi bi-copy me-2"></i>Partiste de la cotización de <b>${esc(nombre)}</b>, que ya se vendió y <b>no cambia</b>. Lo que guardes aquí será una cotización <b>nueva</b>.
+        <button type="button" class="btn btn-sm btn-outline-dark ms-2" id="btnCancelarEdicion">Cancelar</button>`
+        : `<i class="bi bi-pencil-square me-2"></i>Estás <b>editando</b> la cotización de <b>${esc(nombre)}</b>. Al guardar se reemplaza la que ya tenías (con los precios de hoy).
+        <button type="button" class="btn btn-sm btn-outline-dark ms-2" id="btnCancelarEdicion">Cancelar edición</button>`;
+    $('avisoEdicion').classList.remove('d-none');
+    $('btnGuardar').disabled = false;
+    $('btnGuardar').innerHTML = copia ? '<i class="bi bi-save me-1"></i>Guardar como cotización nueva' : '<i class="bi bi-save me-1"></i>Guardar cambios';
+}
+
+async function editar(id, copia = false) {
+    const r = await get('cotizaciones/detalle', { id });
+    if (r.codigo !== 1) {
+        return Swal.fire({ icon: 'error', title: r.mensaje, confirmButtonColor: ORO });
+    }
+    const c = r.datos.cotizacion;
+
+    limpiar();
+    guardada = false;
+    $('nombrePieza').value = c.nombre_pieza || '';
+    $('clienteId').value = c.cliente_id || '';
+    $('altoCm').value = c.alto_cm ? Number(c.alto_cm) : '';
+    $('pintorId').value = c.pintor_id || '';
+    $('costoPintura').value = num(c.costo_pintura) ? Number(c.costo_pintura) : '';
+    const sinTramos = c.envio_pintora === null || c.envio_pintora === undefined;
+    $('envioPintora').value = sinTramos ? Number(c.costo_envio || 0) : Number(c.envio_pintora);
+    $('envioCliente').value = sinTramos ? 0 : Number(c.envio_cliente || 0);
+    actualizarEnvioTotal();
+    $('otrosInsumos').value = Number(c.otros_insumos || 0);
+    $('margenPct').value = c.margen_pct_usado !== null && c.margen_pct_usado !== undefined ? Number(c.margen_pct_usado) : '';
+
+    // Empaque: el del catálogo con ese nombre, el estándar, o un monto libre
+    const emp = empaques.find((e) => e.nombre === c.empaque_nombre);
+    const valor = emp ? String(emp.id) : (c.empaque_nombre === 'Estándar' || !c.empaque_nombre) ? '' : 'otro';
+    (document.querySelector(`input[name="empaque"][value="${valor}"]`) || document.querySelector('input[name="empaque"][value=""]')).checked = true;
+    if (valor === 'otro') $('empaqueCosto').value = Number(c.costo_empaque || 0);
+    actualizarEmpaqueOtro();
+
+    // Partes: una fila por cada una, con su carrete (color)
+    $('partes').innerHTML = '';
+    r.datos.partes.forEach((p) => {
+        agregarParte();
+        const fila = [...document.querySelectorAll('.parte-fila[data-parte]')].pop();
+        fila.querySelector('.p-nombre').value = p.nombre || '';
+        fila.querySelector('.p-material').value = p.material_id;
+        llenarColores(fila, p.color || '');
+        fila.querySelector('.p-gramos').value = Number(p.gramos);
+        fila.querySelector('.p-horas').value = Math.floor(Number(p.minutos) / 60);
+        fila.querySelector('.p-minutos').value = Number(p.minutos) % 60;
+        avisoColor(fila);
+    });
+
+    editandoId = copia ? null : Number(id);
+    entrarEdicion(c.nombre_pieza, copia);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    calcular();
 }
 
 async function guardar() {
@@ -353,6 +423,27 @@ async function guardar() {
         if (!f.querySelector('.p-color').value) {
             return toast.fire({ icon: 'warning', title: `Elige el carrete (color) de “${nombre}”` });
         }
+    }
+
+    if (editandoId) {
+        const act = await post('cotizaciones/actualizar', { ...datos, id: editandoId });
+        if (act.codigo !== 1) {
+            return Swal.fire({ icon: 'error', title: 'No se pudo guardar los cambios', text: act.mensaje, confirmButtonColor: ORO });
+        }
+        const idEditada = editandoId;
+        await cargarHistorial();
+        limpiar();
+        const { isConfirmed: vender } = await Swal.fire({
+            icon: 'success',
+            title: 'Cotización actualizada',
+            html: `Total: <b>${Q0(act.datos.precio_sugerido)}</b> · Ganancia: <b class="text-success">${Q(act.datos.ganancia)}</b>`,
+            showCancelButton: true,
+            confirmButtonText: 'Registrar venta',
+            cancelButtonText: 'Cerrar',
+            confirmButtonColor: ORO,
+        });
+        if (vender) abrirVenta(idEditada);
+        return;
     }
 
     const r = await post('cotizaciones/crear', datos);
@@ -448,6 +539,9 @@ function pintarHistorial() {
                 <button class="btn btn-sm btn-outline-dark" data-ver="${c.id}" title="Ver el cuadre"><i class="bi bi-eye"></i></button>
                 <a class="btn btn-sm btn-outline-secondary" href="${BASE}/cotizaciones/proforma?id=${c.id}" target="_blank" rel="noopener" title="Proforma para el cliente (PDF)"><i class="bi bi-file-earmark-pdf"></i></a>
                 ${vendida ? `<span class="hc-chip mx-1" title="Ya se vendió; puedes venderla otra vez a otro cliente"><i class="bi bi-check-circle-fill text-success"></i> Vendida${Number(c.ventas) > 1 ? ` ×${Number(c.ventas)}` : ''}</span>` : ''}
+                ${vendida
+                    ? `<button class="btn btn-sm btn-outline-primary" data-copiar="${c.id}" title="Ya se vendió y no se cambia. Usarla como base para una cotización nueva"><i class="bi bi-copy"></i></button>`
+                    : `<button class="btn btn-sm btn-outline-primary" data-editar="${c.id}" title="Editar esta cotización"><i class="bi bi-pencil"></i></button>`}
                 <button class="btn btn-sm btn-hc" data-vender="${c.id}"><i class="bi bi-cash-coin"></i> Vender</button>
                 <button class="btn btn-sm btn-outline-danger" data-eliminar="${c.id}" ${vendida ? 'disabled title="Tiene una venta registrada"' : 'title="Eliminar"'}><i class="bi bi-trash"></i></button>
             </td>
@@ -456,6 +550,7 @@ function pintarHistorial() {
 }
 
 document.addEventListener('input', (e) => { if (e.target.id === 'buscaCot') pintarHistorial(); });
+document.addEventListener('click', (e) => { if (e.target.closest('#btnCancelarEdicion')) limpiar(); });
 // Los botones de margen del Resultado ponen ese margen y recalculan
 document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-margen]');
@@ -494,7 +589,8 @@ async function verCuadre(id) {
         `<tr><td>${esc(p.nombre)}</td><td>${esc(p.material)}${p.color ? ' · ' + esc(p.color) : ''}</td><td class="text-end">${num(p.gramos)} g</td><td class="text-end">${tiempo(num(p.minutos))}</td></tr>`
     ).join('');
 
-    await Swal.fire({
+    const vendidaCot = historial.some((h) => String(h.id) === String(id) && Number(h.ventas) > 0);
+    const res = await Swal.fire({
         titleText: c.nombre_pieza,
         width: 560,
         html: `
@@ -507,7 +603,11 @@ async function verCuadre(id) {
             </div>`,
         confirmButtonText: 'Cerrar',
         confirmButtonColor: ORO,
+        showDenyButton: true,
+        denyButtonText: vendidaCot ? '<i class="bi bi-copy me-1"></i>Usar como base' : '<i class="bi bi-pencil me-1"></i>Editar',
+        denyButtonColor: '#0d6efd',
     });
+    if (res.isDenied) editar(id, vendidaCot);
 }
 
 // ── Registrar venta desde una cotización ────────────────────────────────────
@@ -650,6 +750,10 @@ $('tablaCotizaciones').addEventListener('click', (e) => {
     const vender = e.target.closest('[data-vender]');
     const borrar = e.target.closest('[data-eliminar]');
     const ver = e.target.closest('[data-ver]');
+    const edit = e.target.closest('[data-editar]');
+    const copiar = e.target.closest('[data-copiar]');
+    if (edit) editar(edit.dataset.editar);
+    if (copiar) editar(copiar.dataset.copiar, true);
     if (ver) verCuadre(ver.dataset.ver);
     if (vender) abrirVenta(vender.dataset.vender);
     if (borrar) eliminar(borrar.dataset.eliminar);

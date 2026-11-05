@@ -273,6 +273,7 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
 </div>
 
 <div id="appCotizar" data-base="<?= $base ?>">
+    <div id="avisoEdicion" class="d-none mb-3 p-2 px-3" style="border:2px solid #0d6efd;border-left-width:8px;border-radius:10px;background:#eaf2ff"></div>
     <div class="row g-3">
         <!-- ── Datos de la pieza ───────────────────────────────────────────── -->
         <div class="col-lg-7">

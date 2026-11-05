@@ -7,7 +7,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
     <div class="icon-wrap"><i class="bi bi-receipt"></i></div>
     <div>
         <h1>Gastos</h1>
-        <p>Todo lo que sale, con su comprobante y de dónde salió el dinero: filamento, repuestos, pintora, envíos…</p>
+        <p>Solo dinero: lo que <b>sale</b> del negocio (gastos, pintora, envíos…), con su comprobante y de dónde salió. El filamento se maneja en <a href="<?= $base ?>/inventario" style="color:#f6c33b"><b>Inventario</b></a>.</p>
     </div>
     <div class="hc-acciones">
         <input type="month" id="mes" class="form-control" style="width:auto">
@@ -15,38 +15,10 @@ include __DIR__ . '/../partials/hc-estilos.php';
     </div>
 </div>
 
-<style>
-    .caja-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .7rem; }
-    .caja-box { border-radius: 12px; padding: .7rem .95rem; border-left: 5px solid #888; background: #f4f4f1; }
-    .caja-box span { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .4px; color: #555; }
-    .caja-box b { display: block; font-size: 1.7rem; line-height: 1.2; }
-    .caja-box small { color: #666; font-size: .76rem; }
-    .caja-box.k { background: color-mix(in srgb, var(--c) 9%, #fff); border-color: var(--c); }
-    .caja-box.k b { color: var(--c); font-size: 1.9rem; }
-    .caja-box.k span { color: var(--c); font-weight: 600; }
-    .caja-box.k span i { font-size: 1.05rem; margin-right: .4rem; }
-    .caja-box.azul { background: #e8f0fb; border-color: #1d5fa8; } .caja-box.azul b { color: #1d5fa8; }
-    .caja-box.ambar { background: #fff4e0; border-color: #b26a00; } .caja-box.ambar b { color: #b26a00; }
-    .caja-box.verde { background: #e8f6ee; border-color: #117a43; } .caja-box.verde b { color: #117a43; font-size: 2rem; }
-    .caja-box.rojo { background: #fdecea; border-color: #b42318; } .caja-box.rojo b { color: #b42318; font-size: 2rem; }
-    .est { display: inline-block; padding: .12rem .6rem; border-radius: 999px; font-size: .75rem; font-weight: 600; }
-    .est-ok { background: #e8f6ee; color: #117a43; }
-    .est-bajo { background: #fff4e0; color: #b26a00; }
-    .est-sin { background: #fdecea; color: #b42318; }
-    .txt-ok { color: #117a43; } .txt-bajo { color: #b26a00; } .txt-sin { color: #b42318; }
-    .pieza-card { border: 1px solid var(--pc); border-left: 6px solid var(--pc); border-radius: 12px; margin-bottom: .75rem; background: #fff; overflow: hidden; }
-    .pieza-head { background: color-mix(in srgb, var(--pc) 12%, #fff); padding: .6rem .9rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
-    .pieza-head small { display: block; font-size: .68rem; letter-spacing: .5px; color: #666; }
-    .pieza-head b { font-size: 1.2rem; color: var(--pc); text-transform: uppercase; }
-    .pieza-linea { display: flex; gap: .75rem; align-items: center; padding: .55rem .9rem; border-top: 1px solid #eee; flex-wrap: wrap; }
-    .cpt { padding: .15rem .6rem; border-radius: 999px; font-size: .75rem; font-weight: 700; min-width: 96px; text-align: center; }
-    .cpt-pintura { background: #efe7fb; color: #5b2fb0; }
-    .cpt-envio { background: #e3effd; color: #1d5fa8; }
-    .cpt-otros { background: #fff1d6; color: #9a5b00; }
-    .pieza-falta { color: #b26a00; font-size: 1.1rem; min-width: 90px; text-align: right; }
-</style>
+<?php include __DIR__ . '/../partials/gastos-estilos.php'; ?>
 
-<div id="appGastos" data-base="<?= $base ?>">
+<div id="appGastos" data-base="<?= $base ?>" data-vista="gastos">
+    <div id="franjaInv" class="mb-3 p-2 px-3" style="border:1px solid #0b7285;border-left:6px solid #0b7285;border-radius:10px;background:#e8f6f8"></div>
     <div class="hc-card mb-3">
         <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
             <h2 class="mb-0"><i class="bi bi-safe2 me-2"></i>Caja del negocio</h2>
@@ -94,7 +66,9 @@ include __DIR__ . '/../partials/hc-estilos.php';
             <h4 class="h6 mt-4 mb-2">Cierres anteriores</h4>
             <div id="cHistorial"></div>
         </div>
-        <div class="table-responsive mt-3">
+        <h3 class="h5 mt-4 mb-1"><i class="bi bi-piggy-bank me-2" style="color:#087f5b"></i>Tu dinero en el negocio <span class="hc-ayuda fw-normal">lo que tú pones y sacas</span></h3>
+        <div class="hc-ayuda">No son gastos: es dinero <b>tuyo</b> que entra (“Pusiste”) o sale (“Sacaste”) de la caja. Una compra pagada “De mi bolsillo” aparece aquí como “Pusiste” y en <b>Gastos</b> como lo que se compró: es la misma compra vista de dos lados, no se cuenta doble.</div>
+        <div class="table-responsive mt-2">
             <table class="table table-sm align-middle mb-0 hc-tabla-nw" id="tablaAportes">
                 <thead><tr><th>Fecha</th><th>Movimiento</th><th>Detalle</th><th class="text-end">Monto</th><th></th></tr></thead>
                 <tbody></tbody>
@@ -103,24 +77,13 @@ include __DIR__ . '/../partials/hc-estilos.php';
     </div>
 
     <div class="hc-card mb-3">
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
-            <h2 class="mb-0"><i class="bi bi-box-seam me-2"></i>Inventario de filamento <span class="hc-ayuda fw-normal">en kg y en dinero</span></h2>
-            <div class="d-flex gap-2">
-                <button class="btn btn-sm btn-hc" id="btnComprar"><i class="bi bi-cart-plus me-1"></i>Comprar filamento</button>
-                <a class="btn btn-sm btn-outline-dark" id="lnkMateriales" href="#" title="Agregar o editar materiales y su costo por kilo"><i class="bi bi-layers me-1"></i>Agregar Materiales de Filamentos</a>
-                <button class="btn btn-sm btn-outline-dark" id="btnInicial" title="Filamento que ya tenías antes de usar la app"><i class="bi bi-box-arrow-in-down me-1"></i>Ya tenía filamento</button>
-            </div>
-        </div>
-        <div id="inventario"></div>
-    </div>
-
-    <div class="hc-card mb-3">
         <h2><i class="bi bi-palette me-2"></i>Pagos pendientes de las piezas <span class="hc-ayuda fw-normal">pintora · envíos · otros insumos</span></h2>
         <div id="pintora"></div>
     </div>
 
-    <div class="hc-kpis" id="kpis"></div>
     <div class="hc-card">
+        <h2 class="mb-2"><i class="bi bi-receipt me-2"></i>Gastos <span class="hc-ayuda fw-normal">lo que sale del negocio en el período</span></h2>
+        <div class="hc-kpis" id="kpis"></div>
         <div class="mb-3" id="porCategoria"></div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 hc-tabla-nw" id="tablaGastos">
@@ -138,7 +101,7 @@ include __DIR__ . '/../partials/hc-estilos.php';
                 <tbody></tbody>
             </table>
         </div>
-        <p class="hc-ayuda mt-2 mb-0">Los gastos no se borran: se editan y queda guardado cómo estaban antes. Los pagos de una pieza (pintora, envío, otros) se registran en “Pagos pendientes”; el filamento, en el inventario.</p>
+        <p class="hc-ayuda mt-2 mb-0">Los gastos no se borran: se editan y queda guardado cómo estaban antes. Los pagos de una pieza (pintora, envío, otros) se registran en “Pagos pendientes”; el filamento, en Inventario (aquí solo ves lo que costó).</p>
     </div>
 </div>
 

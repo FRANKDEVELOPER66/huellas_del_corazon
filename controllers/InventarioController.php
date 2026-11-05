@@ -14,6 +14,11 @@ class InventarioController
 {
     use RespuestaApi, Comprobantes, ReglasGasto;
 
+    public static function index(Router $router): void
+    {
+        $router->render('inventario/index', []);
+    }
+
     // Stock por material (kg y Q) y las entradas registradas
     public static function resumenAPI(Router $router): void
     {

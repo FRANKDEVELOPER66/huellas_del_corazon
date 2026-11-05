@@ -65,22 +65,7 @@ class CotizacionesController
 
         [$cfg, $partes, $r, $pintorId, $alto] = self::calcularDesdePost();
 
-        // Con carretes en el sistema, toda parte debe salir de un carrete real: así el precio y el descuento de filamento son exactos
-        if (Inventario::hayCarretes()) {
-            $hay = [];
-            foreach (Inventario::colores() as $c) {
-                $hay[$c['material_id'] . '|' . mb_strtolower($c['color'])] = true;
-            }
-            foreach ($partes as $i => $p) {
-                $n = $i + 1;
-                if (!$p['color']) {
-                    self::responder(0, "Elige el carrete (color) de la parte {$n}. Si no tienes carretes de ese material, regístralos en Gastos > Inventario de filamento");
-                }
-                if (!isset($hay[$p['material_id'] . '|' . mb_strtolower($p['color'])])) {
-                    self::responder(0, "No hay carrete de ese color con filamento para la parte {$n}. Regístralo en Gastos > Inventario de filamento");
-                }
-            }
-        }
+        self::exigirCarretes($partes);
 
         $cotizacion = new Cotizacion(array_merge($r, [
             'cliente_id'       => (int)($_POST['cliente_id'] ?? 0) ?: null,
@@ -126,6 +111,75 @@ class CotizacionesController
         }
 
         self::responder(1, 'Cotización guardada', ['id' => $cotizacionId, 'datos' => $r]);
+    }
+
+    // Editar una cotización guardada: se vuelve a calcular con los datos del formulario y la configuración vigente.
+    // Si ya tiene una venta, no se edita (el precio acordado y los costos de la venta ya dependen de ella).
+    public static function actualizarAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        $id = (int)($_POST['id'] ?? 0);
+        $cotizacion = $id ? Cotizacion::find($id) : null;
+        if (!$cotizacion) {
+            self::responder(0, 'Cotización no encontrada');
+        }
+        $uso = ActiveRecord::fetchArray('SELECT COUNT(*) AS total FROM ventas WHERE cotizacion_id = ?', [$id]);
+        if ((int)($uso[0]['total'] ?? 0) > 0) {
+            self::responder(0, 'Esta cotización ya tiene una venta: no se puede editar. Haz una cotización nueva.');
+        }
+
+        [$cfg, $partes, $r, $pintorId, $alto] = self::calcularDesdePost();
+        self::exigirCarretes($partes);
+
+        $nombre = trim($_POST['nombre_pieza'] ?? '');
+        $nuevos = array_merge($r, [
+            'cliente_id'       => (int)($_POST['cliente_id'] ?? 0) ?: null,
+            'configuracion_id' => (int)$cfg->id,
+            'pintor_id'        => $pintorId,
+            'nombre_pieza'     => $nombre,
+            'alto_cm'          => $alto
+        ]);
+        foreach (['cliente_id', 'configuracion_id', 'pintor_id', 'nombre_pieza', 'alto_cm', 'costo_pintura', 'costo_envio', 'envio_pintora', 'envio_cliente', 'otros_insumos', 'total_gramos', 'total_minutos', 'costo_material', 'costo_luz', 'costo_desgaste', 'costo_empaque', 'empaque_nombre', 'costo_total', 'margen_pct_usado', 'precio_sugerido'] as $campo) {
+            if (array_key_exists($campo, $nuevos)) {
+                $cotizacion->$campo = $nuevos[$campo];
+            }
+        }
+        self::errores($cotizacion->validar());
+
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+
+        try {
+            $cotizacion->actualizar();
+            $db->prepare('DELETE FROM cotizacion_partes WHERE cotizacion_id = ?')->execute([$id]);
+
+            foreach ($partes as $p) {
+                $parte = new CotizacionParte([
+                    'cotizacion_id' => $id,
+                    'material_id'   => $p['material_id'],
+                    'color'         => $p['color'],
+                    'nombre'        => $p['nombre'],
+                    'gramos'        => $p['gramos'],
+                    'minutos'       => $p['minutos']
+                ]);
+                $alertas = $parte->validar();
+                if (!empty($alertas['error'])) {
+                    throw new \InvalidArgumentException(implode(', ', $alertas['error']));
+                }
+                $parte->crear();
+            }
+
+            $db->commit();
+        } catch (\InvalidArgumentException $e) {
+            $db->rollBack();
+            self::responder(0, $e->getMessage());
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            self::responder(0, 'No se pudo guardar la cotización');
+        }
+
+        self::responder(1, 'Cotización actualizada', ['id' => $id, 'datos' => $r]);
     }
 
     public static function detalleAPI(Router $router): void
@@ -178,6 +232,27 @@ class CotizacionesController
 
         $cotizacion->eliminar();
         self::responder(1, 'Cotización eliminada correctamente');
+    }
+
+    // Con carretes en el sistema, toda parte debe salir de un carrete real: así el precio y el descuento de filamento son exactos
+    private static function exigirCarretes(array $partes): void
+    {
+        if (!Inventario::hayCarretes()) {
+            return;
+        }
+        $hay = [];
+        foreach (Inventario::colores() as $c) {
+            $hay[$c['material_id'] . '|' . mb_strtolower($c['color'])] = true;
+        }
+        foreach ($partes as $i => $p) {
+            $n = $i + 1;
+            if (!$p['color']) {
+                self::responder(0, "Elige el carrete (color) de la parte {$n}. Si no tienes carretes de ese material, regístralos en Inventario");
+            }
+            if (!isset($hay[$p['material_id'] . '|' . mb_strtolower($p['color'])])) {
+                self::responder(0, "No hay carrete de ese color con filamento para la parte {$n}. Regístralo en Inventario");
+            }
+        }
     }
 
     // Lee y valida el POST y calcula con la configuración vigente.

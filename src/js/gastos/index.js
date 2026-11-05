@@ -3,6 +3,8 @@ import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, 
 
 const BASE = $('appGastos').dataset.base || '';
 const { get, post } = crearApi(BASE);
+const VISTA = $('appGastos').dataset.vista || 'gastos'; // 'gastos' (dinero) o 'inventario' (filamento)
+const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
 const CARRETE_VACIO_G = 250; // peso fijo de un carrete vacío (báscula − 250 g = filamento que queda)
 if ($('lnkMateriales')) $('lnkMateriales').href = `${BASE}/materiales`;
 
@@ -24,12 +26,26 @@ let inventario = { materiales: [], compras: [] };
 
 async function cargar() {
     cargarCaja();
-    cargarInventario();
+    if (VISTA === 'inventario') {
+        cargarInventario();
+        return;
+    }
+    cargarFranjaInventario();
     cargarPintora();
-    const mes = $('mes').value;
+    const mes = $('mes') ? $('mes').value : '';
     const r = await get('gastos/listar', mes ? { mes } : {});
     gastos = r.datos || [];
     pintar();
+}
+
+// En Gastos solo un resumen corto del filamento, con el atajo a su pantalla
+async function cargarFranjaInventario() {
+    const el = $('franjaInv');
+    if (!el) return;
+    const r = await get('inventario/resumen');
+    if (r.codigo !== 1) return;
+    const d = r.datos;
+    el.innerHTML = `<i class="bi bi-boxes me-2"></i>Filamento en inventario: <b>${kgf(d.total_kg)}</b> · valen <b>${Q(d.total_valor)}</b>${d.alertas > 0 ? ` · <b class="txt-sin">${d.alertas} por reponer</b>` : ''} <a class="btn btn-sm btn-outline-dark ms-2" href="${BASE}/inventario">Ir a Inventario</a>`;
 }
 
 function pintar() {
@@ -178,24 +194,24 @@ async function verHistorial(tipo, id) {
     });
 }
 
-$('mes').addEventListener('change', cargar);
-$('btnNuevoGasto').addEventListener('click', () => formGasto());
-$('tablaGastos').addEventListener('click', (e) => {
+on('mes', 'change', cargar);
+on('btnNuevoGasto', 'click', () => formGasto());
+on('tablaGastos', 'click', (e) => {
     const ed = e.target.closest('[data-editar]');
     const hist = e.target.closest('[data-hist-gasto]');
     if (hist) return verHistorial('gasto', hist.dataset.histGasto);
     if (!ed) return;
     const g = gastos.find((x) => String(x.id) === ed.dataset.editar);
-    // Las compras de filamento se editan como compra (kg y costo)
+    // Las compras de filamento se editan en Inventario (kg, carretes y costo)
     if (g.tipo_categoria === 'inventario') {
-        const compra = inventario.compras.find((c) => String(c.gasto_id) === String(g.id));
-        return compra ? formCompra(compra) : Swal.fire({ icon: 'info', title: 'Compra sin kg registrados', text: 'Esta compra es anterior al inventario. Regístrala de nuevo con “Comprar filamento”.', confirmButtonColor: ORO });
+        return Swal.fire({ icon: 'info', title: 'Esta compra se edita en Inventario', text: 'Ahí cambias los kg, los carretes y el costo de la compra de filamento.', showCancelButton: true, confirmButtonText: 'Ir a Inventario', cancelButtonText: 'Cerrar', confirmButtonColor: ORO })
+            .then((x) => { if (x.isConfirmed) location.href = `${BASE}/inventario`; });
     }
     formGasto(g);
 });
 
 (async () => {
-    $('mes').value = mesActual();
+    if ($('mes')) $('mes').value = mesActual();
     categorias = (await get('gastos/categorias')).datos || [];
     cargar();
 })();
@@ -212,6 +228,8 @@ async function cargarCaja() {
     const c = r.datos.caja;
     cajaActual = c;
     movimientos = r.datos.movimientos || [];
+
+    if (!$('cajaKpis')) return; // en Inventario solo se necesita saber cuánta caja hay
 
     $('cajaKpis').innerHTML = `
         <div class="caja-grid">
@@ -339,10 +357,10 @@ async function formMovimiento(tipo) {
     cargarCaja();
 }
 
-$('btnAporte').addEventListener('click', () => formMovimiento('aporte'));
-$('btnRetiro').addEventListener('click', () => formMovimiento('retiro'));
-$('btnCapital').addEventListener('click', () => formDevolver());
-$('tablaAportes').addEventListener('click', async (e) => {
+on('btnAporte', 'click', () => formMovimiento('aporte'));
+on('btnRetiro', 'click', () => formMovimiento('retiro'));
+on('btnCapital', 'click', () => formDevolver());
+on('tablaAportes', 'click', async (e) => {
     const b = e.target.closest('[data-del-mov]');
     if (!b || !(await confirmar('¿Eliminar este movimiento de caja?'))) return;
     const r = await post('caja/eliminar', { id: b.dataset.delMov });
@@ -497,17 +515,17 @@ async function reabrirCierre(id) {
     cargar();
 }
 
-$('btnConciliar').addEventListener('click', () => {
+on('btnConciliar', 'click', () => {
     const panel = $('conciliar');
     panel.classList.toggle('d-none');
     if (!panel.classList.contains('d-none')) cargarConciliacion();
 });
-$('cHasta').addEventListener('change', cargarConciliacion);
-$('cSaldo').addEventListener('input', recalcularConciliacion);
-$('tablaConc').addEventListener('change', recalcularConciliacion);
-$('cTodos').addEventListener('click', () => { document.querySelectorAll('.c-visto').forEach((c) => (c.checked = true)); recalcularConciliacion(); });
-$('btnGuardarConc').addEventListener('click', guardarConciliacion);
-$('cEstado').addEventListener('click', (e) => {
+on('cHasta', 'change', cargarConciliacion);
+on('cSaldo', 'input', recalcularConciliacion);
+on('tablaConc', 'change', recalcularConciliacion);
+on('cTodos', 'click', () => { document.querySelectorAll('.c-visto').forEach((c) => (c.checked = true)); recalcularConciliacion(); });
+on('btnGuardarConc', 'click', guardarConciliacion);
+on('cEstado', 'click', (e) => {
     const b = e.target.closest('#btnReabrir');
     if (b) reabrirCierre(b.dataset.id);
 });
@@ -663,7 +681,7 @@ async function saldarConcepto(f) {
     cargar();
 }
 
-$('pintora').addEventListener('click', (e) => {
+on('pintora', 'click', (e) => {
     const pagar = e.target.closest('[data-pagar]');
     const saldar = e.target.closest('[data-saldar]');
     if (pagar) pagarPendiente(pendientesPintora[Number(pagar.dataset.pagar)]);
@@ -1216,8 +1234,8 @@ async function formCompra(c = null, inicial = false) {
     cargar();
 }
 
-$('btnComprar').addEventListener('click', () => formCompra());
-$('btnInicial').addEventListener('click', () => formCompra(null, true));
+on('btnComprar', 'click', () => formCompra());
+on('btnInicial', 'click', () => formCompra(null, true));
 // Buscador de carretes: solo repinta las filas, así el cursor no se pierde
 function aplicarFiltroCarretes() {
     const tb = document.getElementById('tbodyCarretes');
@@ -1231,12 +1249,12 @@ function aplicarFiltroCarretes() {
         n.innerHTML = q ? `${total.length} carrete${total.length === 1 ? '' : 's'} · <b>${gr(vivos.reduce((s, k) => s + num(k.gramos_actuales), 0))}</b> disponibles` : '';
     }
 }
-$('inventario').addEventListener('input', (e) => {
+on('inventario', 'input', (e) => {
     if (e.target.id !== 'fCarretes') return;
     filtroCarretes = e.target.value;
     aplicarFiltroCarretes();
 });
-$('inventario').addEventListener('click', (e) => {
+on('inventario', 'click', (e) => {
     const chip = e.target.closest('[data-filtro-color]');
     if (chip) {
         filtroCarretes = chip.dataset.filtroColor;

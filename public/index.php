@@ -46,6 +46,7 @@ $router->get('/API/cotizaciones/detalle',   [CotizacionesController::class, 'det
 $router->post('/API/cotizaciones/calcular', [CotizacionesController::class, 'calcularAPI']);
 $router->post('/API/cotizaciones/crear',    [CotizacionesController::class, 'crearAPI']);
 $router->post('/API/cotizaciones/eliminar', [CotizacionesController::class, 'eliminarAPI']);
+$router->post('/API/cotizaciones/actualizar', [CotizacionesController::class, 'actualizarAPI']);
 
 // ---- API: ventas y pagos ----
 $router->get('/API/ventas/listar',          [VentasController::class, 'listarAPI']);
@@ -130,6 +131,7 @@ $router->post('/API/inventario/actualizar', [InventarioController::class, 'actua
 $router->get('/API/gastos/historial',       [GastosController::class, 'historialAPI']);
 $router->post('/API/inventario/carrete-peso',  [InventarioController::class, 'carretePesoAPI']);
 $router->post('/API/inventario/carrete-color', [InventarioController::class, 'carreteColorAPI']);
+$router->get('/inventario',     [InventarioController::class, 'index']);
 
 $router->post('/API/inventario/carrete-peso',  [InventarioController::class, 'carretePesoAPI']);
 $router->post('/API/inventario/carrete-color', [InventarioController::class, 'carreteColorAPI']);
