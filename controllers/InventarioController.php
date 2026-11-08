@@ -35,8 +35,10 @@ class InventarioController
             $bajos += ($m['estado'] !== 'ok' && ((float) $m['comprado_kg'] > 0 || (float) $m['usado_kg'] > 0)) ? 1 : 0;
         }
 
+        $devCols = Inventario::hayDevoluciones() ? 'cm.devuelta_en, cm.devuelta_kg, cm.devuelta_q, cm.devuelta_nota,' : '';
         $compras = ActiveRecord::fetchArray(
             "SELECT cm.id, cm.fecha, cm.material_id, m.nombre AS material, cm.kg, cm.costo_total, cm.origen, cm.gasto_id,
+                    $devCols
                     g.comprobante,
                     (SELECT COUNT(*) FROM gastos_historial h WHERE h.tipo = 'compra' AND h.ref_id = cm.id) AS ediciones
              FROM compras_material cm
@@ -60,6 +62,8 @@ class InventarioController
             'alerta_g'   => Inventario::alertaGramos(),
             'colores'    => Inventario::colores(),
             'merma'      => Inventario::merma(),
+            'pruebas_ok' => Inventario::hayPruebas(),
+            'pruebas'    => Inventario::pruebas(),
         ]]);
     }
 
@@ -474,6 +478,128 @@ class InventarioController
         }
 
         self::responder(1, 'Peso actualizado');
+    }
+
+    // POST: id (de la compra), fecha, nota. Devuelve la compra al proveedor: quita sus carretes del inventario y regresa el dinero.
+    // No borra nada: la compra queda marcada como devuelta con lo que era, y el gasto queda en Q0 con su historial.
+    public static function devolverCompraAPI(Router $router): void
+    {
+        getHeadersApi();
+        if (!Inventario::hayDevoluciones()) {
+            self::responder(0, 'Falta ejecutar sql/devolucion_compra.sql en tu base de datos');
+        }
+        $filas = ActiveRecord::fetchArray(
+            'SELECT cm.*, g.comprobante AS g_comprobante, g.descripcion AS g_descripcion
+             FROM compras_material cm LEFT JOIN gastos g ON g.id = cm.gasto_id WHERE cm.id = ?',
+            [(int) ($_POST['id'] ?? 0)]
+        );
+        if (!$filas) {
+            self::responder(0, 'Compra no encontrada');
+        }
+        $c = $filas[0];
+        $id = (int) $c['id'];
+        if ($c['origen'] === 'inicial') {
+            self::responder(0, 'El inventario inicial no es una compra: no se devuelve');
+        }
+        if ($c['devuelta_en']) {
+            self::responder(0, 'Esta compra ya fue devuelta');
+        }
+        $fecha = (string) ($_POST['fecha'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) {
+            $fecha = date('Y-m-d');
+        }
+        self::exigirAbierta((string) $c['fecha'], $fecha);
+
+        // Solo se devuelve lo que no se ha tocado: ningún carrete usado, pesado ni probado
+        $carretes = Inventario::hayCarretes() ? ActiveRecord::fetchArray('SELECT * FROM carretes WHERE compra_id = ?', [$id]) : [];
+        foreach ($carretes as $k) {
+            $usos = (int) ActiveRecord::fetchArray('SELECT COUNT(*) AS n FROM carrete_consumos WHERE carrete_id = ?', [(int) $k['id']])[0]['n'];
+            $ajustes = (int) ActiveRecord::fetchArray('SELECT COUNT(*) AS n FROM carrete_ajustes WHERE carrete_id = ?', [(int) $k['id']])[0]['n'];
+            if ($usos > 0 || $ajustes > 0 || abs((float) $k['gramos_actuales'] - (float) $k['gramos_registrados']) > 0.005) {
+                self::responder(0, 'No se puede devolver: el carrete ' . $k['color'] . ' ya se usó o se ajustó. Solo se devuelve filamento sin tocar');
+            }
+        }
+        if (!$carretes) {
+            // Compra sin carretes: el stock del material no puede quedar en negativo
+            foreach (Inventario::resumen() as $m) {
+                if ((int) $m['id'] === (int) $c['material_id'] && (float) $m['disponible_kg'] - (float) $c['kg'] < -0.0005) {
+                    self::responder(0, 'No se puede: ya usaste ese filamento');
+                }
+            }
+        }
+        $nota = mb_substr(trim((string) ($_POST['nota'] ?? '')), 0, 200);
+
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+        try {
+            self::guardarHistorial('compra', $id, [
+                'fecha'       => $c['fecha'],
+                'material_id' => (int) $c['material_id'],
+                'kg'          => (float) $c['kg'],
+                'costo_total' => (float) $c['costo_total'],
+                'comprobante' => $c['g_comprobante'],
+                'devolucion'  => $fecha,
+            ]);
+            foreach ($carretes as $k) {
+                $db->prepare('DELETE FROM carretes WHERE id = ?')->execute([(int) $k['id']]);
+            }
+            $db->prepare('UPDATE compras_material SET devuelta_en = ?, devuelta_kg = kg, devuelta_q = costo_total, devuelta_nota = ?, kg = 0, costo_total = 0 WHERE id = ?')
+                ->execute([$fecha, $nota !== '' ? $nota : null, $id]);
+            if ($c['gasto_id']) {
+                $gastoId = (int) $c['gasto_id'];
+                $desc = mb_substr('DEVUELTA: ' . $c['g_descripcion'], 0, 250);
+                $db->prepare('UPDATE gastos SET monto = 0, descripcion = ? WHERE id = ?')->execute([$desc, $gastoId]);
+                self::sincronizarAporte($gastoId, (string) $c['origen'], 0.0, (string) $c['fecha'], $desc);
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            self::responder(0, 'No se pudo registrar la devolución');
+        }
+        self::responder(1, 'Compra devuelta: el filamento salió del inventario y el dinero regresó');
+    }
+
+    // POST: id (carrete), gramos (lo que gastó la prueba), nota
+    // Impresión de prueba: baja el carrete y el inventario, pero no es venta ni gasto: no toca la ganancia
+    public static function pruebaAPI(Router $router): void
+    {
+        getHeadersApi();
+        if (!Inventario::hayPruebas()) {
+            self::responder(0, 'Falta ejecutar sql/pruebas.sql en tu base de datos');
+        }
+        $filas = ActiveRecord::fetchArray('SELECT * FROM carretes WHERE id = ?', [(int) ($_POST['id'] ?? 0)]);
+        if (!$filas) {
+            self::responder(0, 'Elige el carrete que usaste');
+        }
+        $k = $filas[0];
+        $gramos = round((float) ($_POST['gramos'] ?? 0), 2);
+        if ($gramos <= 0) {
+            self::responder(0, 'Escribe cuántos gramos gastó la prueba');
+        }
+        $antes = round((float) $k['gramos_actuales'], 2);
+        if ($gramos > $antes + 0.005) {
+            self::responder(0, 'Ese carrete solo tiene ' . $antes . ' g: elige otro o corrige los gramos');
+        }
+        $nota = trim((string) ($_POST['nota'] ?? ''));
+        $motivo = mb_substr('Prueba' . ($nota !== '' ? ': ' . $nota : ''), 0, 250);
+        $despues = round($antes - $gramos, 2);
+
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+        try {
+            $db->prepare("INSERT INTO carrete_ajustes (carrete_id, gramos_antes, gramos_despues, delta_g, motivo, tipo) VALUES (?, ?, ?, ?, ?, 'prueba')")
+                ->execute([(int) $k['id'], $antes, $despues, -$gramos, $motivo]);
+            $db->prepare('UPDATE carretes SET gramos_actuales = ? WHERE id = ?')->execute([$despues, (int) $k['id']]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            self::responder(0, 'No se pudo guardar la prueba');
+        }
+        self::responder(1, 'Prueba registrada: -' . $gramos . ' g');
     }
 
     // POST: id (carrete), color

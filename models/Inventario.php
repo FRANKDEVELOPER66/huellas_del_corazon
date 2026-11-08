@@ -397,6 +397,54 @@ class Inventario
         return $alertas;
     }
 
+    public static function hayDevoluciones(): bool
+    {
+        static $hay = null;
+        if ($hay === null) {
+            $hay = count(ActiveRecord::fetchArray("SHOW COLUMNS FROM compras_material LIKE 'devuelta_en'")) > 0;
+        }
+        return $hay;
+    }
+
+    public static function hayPruebas(): bool
+    {
+        static $hay = null;
+        if ($hay === null) {
+            $hay = self::hayCarretes() && count(ActiveRecord::fetchArray("SHOW COLUMNS FROM carrete_ajustes LIKE 'tipo'")) > 0;
+        }
+        return $hay;
+    }
+
+    // Impresiones de prueba (filamento gastado sin vender): total y últimas
+    public static function pruebas(): array
+    {
+        $vacio = ['total_g' => 0.0, 'total_q' => 0.0, 'cantidad' => 0, 'mes_g' => 0.0, 'mes_q' => 0.0, 'ultimas' => []];
+        if (!self::hayPruebas()) {
+            return $vacio;
+        }
+        $mes = date('Y-m');
+        $t = ActiveRecord::fetchArray(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(-a.delta_g), 0) AS g, COALESCE(SUM(-a.delta_g * k.costo / k.peso_inicial_g), 0) AS q,
+                    COALESCE(SUM(CASE WHEN DATE_FORMAT(a.creado_en, '%Y-%m') = ? THEN -a.delta_g END), 0) AS mg,
+                    COALESCE(SUM(CASE WHEN DATE_FORMAT(a.creado_en, '%Y-%m') = ? THEN -a.delta_g * k.costo / k.peso_inicial_g END), 0) AS mq
+             FROM carrete_ajustes a JOIN carretes k ON k.id = a.carrete_id WHERE a.tipo = 'prueba'",
+            [$mes, $mes]
+        )[0];
+        $ult = ActiveRecord::fetchArray(
+            "SELECT a.id, a.creado_en, k.color, -a.delta_g AS gramos, -a.delta_g * k.costo / k.peso_inicial_g AS costo, a.motivo
+             FROM carrete_ajustes a JOIN carretes k ON k.id = a.carrete_id WHERE a.tipo = 'prueba'
+             ORDER BY a.id DESC LIMIT 8"
+        );
+        foreach ($ult as &$u) {
+            $u['gramos'] = round((float) $u['gramos'], 2);
+            $u['costo'] = round((float) $u['costo'], 2);
+        }
+        return [
+            'total_g'  => round((float) $t['g'], 2), 'total_q' => round((float) $t['q'], 2), 'cantidad' => (int) $t['n'],
+            'mes_g'    => round((float) $t['mg'], 2), 'mes_q' => round((float) $t['mq'], 2), 'ultimas' => $ult,
+        ];
+    }
+
     // Merma que presupuestaste en las cotizaciones (de las piezas que ya se imprimen) contra lo que de verdad se perdió en fallas
     public static function merma(): array
     {

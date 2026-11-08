@@ -28,7 +28,20 @@
     #campanaBtn.hc-urgente #campanaN { animation: hc-campana-latido 1.2s 3; }
     #campanaBtn.hc-normal .bi-bell-fill { animation: hc-campana-suena 1.5s 1; }
 
+    /* Etiqueta de fecha de los recordatorios: destaca y brilla una sola vez al abrir la campana */
+    .hc-vence { display: inline-block; margin-top: 3px; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 800; letter-spacing: .02em; }
+    .hc-vence.manana  { background: #f6c33b; color: #1c1c1c; }
+    .hc-vence.hoy     { background: #fd7e14; color: #fff; }
+    .hc-vence.vencido { background: #c92a4b; color: #fff; }
+    #campana .dropdown-menu.show .hc-vence { animation: hc-vence-brilla 1.4s 2; }
+    @keyframes hc-vence-brilla {
+        0%   { box-shadow: 0 0 0 0 rgba(246,195,59,.9); }
+        70%  { box-shadow: 0 0 0 9px rgba(246,195,59,0); }
+        100% { box-shadow: 0 0 0 0 rgba(246,195,59,0); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
+        .hc-vence { animation: none !important; }
         #campanaBtn, #campanaBtn .bi-bell-fill, #campanaBtn #campanaN { animation: none !important; }
     }
 </style>
@@ -104,7 +117,8 @@
                 lista.innerHTML = l.length ? l.map(function (a) {
                     return '<a class="d-flex gap-2 text-decoration-none text-dark px-3 py-2 border-bottom align-items-start" style="border-left:5px solid ' + color[a.nivel] + '" href="' + BASE + a.url + '">'
                         + '<i class="bi ' + esc(a.icono) + ' fs-5 mt-1" style="color:' + color[a.nivel] + '"></i>'
-                        + '<span class="flex-grow-1"><b class="d-block">' + esc(a.titulo) + '</b><span class="small text-muted">' + esc(a.detalle) + '</span></span>'
+                        + '<span class="flex-grow-1"><b class="d-block">' + esc(a.titulo) + '</b><span class="small text-muted">' + esc(a.detalle) + '</span>'
+                        + (a.etiqueta ? '<span class="d-block"><span class="hc-vence ' + esc(a.etiqueta.clase) + '"><i class="bi bi-alarm me-1"></i>' + esc(a.etiqueta.texto) + '</span></span>' : '') + '</span>'
                         + (a.monto ? '<b class="text-nowrap">' + Q(a.monto) + '</b>' : '') + '</a>';
                 }).join('') : '<div class="p-4 text-center text-muted"><i class="bi bi-check-circle fs-2 d-block mb-2" style="color:#2f9e44"></i>Todo al día. No tienes nada pendiente.</div>';
             }

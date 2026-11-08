@@ -141,8 +141,13 @@ $router->post('/API/inventario/carrete-color', [InventarioController::class, 'ca
 // ---- Carretes · paso 2 (InventarioController y PedidosController ya están importados) ----
 $router->get('/API/inventario/colores',   [InventarioController::class, 'coloresAPI']);
 $router->get('/API/inventario/alertas',   [InventarioController::class, 'alertasAPI']);
+$router->post('/API/inventario/devolver-compra', [InventarioController::class, 'devolverCompraAPI']);
+
+
+$router->post('/API/inventario/prueba', [InventarioController::class, 'pruebaAPI']);
 $router->get('/API/pedidos/carretes',     [PedidosController::class, 'carretesAPI']);
 $router->post('/API/pedidos/falla',       [PedidosController::class, 'fallaAPI']);
+
 
 
 // ---- Cierre de período (reemplaza a "Conciliar con el banco") ----

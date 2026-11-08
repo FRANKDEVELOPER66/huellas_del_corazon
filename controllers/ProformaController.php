@@ -17,7 +17,7 @@ class ProformaController
         'negocio'     => ['Huellas del Corazón', 80],
         'lema'        => ['Figuras personalizadas impresas en 3D y pintadas a mano', 120],
         'contacto'    => ['', 160],
-        'incluye'     => ['Impresión 3D y empaque', 200],
+        'incluye'     => ['Impresión 3D, pintado a mano y empaque', 200],
         'entrega'     => ['15 días hábiles (de lunes a viernes) a partir de recibir el anticipo', 160],
         'pago'        => ['Depósito o transferencia bancaria. Los datos de la cuenta se envían por mensaje.', 255],
         'condiciones' => ['Pieza personalizada: una vez iniciada la impresión no se aceptan cambios.', 255],
@@ -101,6 +101,20 @@ class ProformaController
         $telefono = $cli[0]['telefono'] ?? '';
 
         $a = self::ajustes();
+        // ¿La pieza lleva pintura a mano? Lo dice la cotización (costo de pintura mayor a 0)
+        $conPintura = (float) $c->costo_pintura > 0.005;
+        $partes = ['Impresión 3D'];
+        if ($conPintura) {
+            $partes[] = 'pintado a mano';
+        }
+        if ((float) $c->costo_empaque > 0.005) {
+            $partes[] = 'empaque';
+        }
+        $a['incluye'] = count($partes) > 1 ? implode(', ', array_slice($partes, 0, -1)) . ' y ' . end($partes) : $partes[0];
+        if (!$conPintura) {
+            // El lema tampoco menciona la pintura si la pieza no la lleva
+            $a['lema'] = trim(preg_replace('/\s*(?:,|y)?\s*pintad[oa]s?\s+a\s+mano/iu', '', $a['lema']));
+        }
         $precio = round((float) $c->precio_sugerido, 2);
         $anticipoPct = (float) $a['anticipo'];
         $hoy = date('d/m/Y');
@@ -119,7 +133,12 @@ class ProformaController
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= $h($numero) ?> · <?= $h($a['negocio']) ?></title>
+<?php
+    // El navegador usa el título como nombre del PDF: PF-0043-Pieza - Cliente
+    $limpiar = fn(string $t) => trim((string) preg_replace('#[\\\\/:*?"<>|\r\n]+#u', ' ', $t));
+    $titulo = $numero . '-' . $limpiar((string) $c->nombre_pieza) . ($cliente !== '' ? ' - ' . $limpiar($cliente) : '');
+?>
+<title><?= $h($titulo) ?></title>
 <style>
     :root { --oro: #b8860b; --tinta: #26231d; --suave: #6f695c; --linea: #e4dccb; --fondo: #f6f3ec; }
     * { box-sizing: border-box; }
@@ -133,7 +152,7 @@ class ProformaController
     .cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 3px solid var(--oro); padding-bottom: 1rem; }
     .marca { display: flex; gap: .8rem; align-items: center; }
     .logo-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; }
-    .logo { height: 300px; width: auto; max-width: 280px; object-fit: contain; display: block; }
+    .logo { height: 112px; width: auto; max-width: 280px; object-fit: contain; display: block; }
     .lemas p { margin: 0; color: var(--suave); font-size: .8rem; line-height: 1.35; }
     .alt { display: none; gap: .8rem; align-items: center; }
     .marca svg { width: 54px; height: 54px; flex: none; }

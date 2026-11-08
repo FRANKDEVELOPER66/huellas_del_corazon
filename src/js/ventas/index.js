@@ -16,8 +16,10 @@ async function cargar() {
 
 function pintar() {
     const suma = (campo) => ventas.reduce((s, v) => s + num(v[campo]), 0);
+    // Las ventas canceladas ya no son venta: no cuentan en “Vendido”
+    const vendido = ventas.filter((v) => v.estado_pedido !== 'cancelado').reduce((s, v) => s + num(v.precio_venta), 0);
     $('kpis').innerHTML = `
-        <div class="hc-kpi"><div class="t">Vendido</div><div class="v">${Q(suma('precio_venta'))}</div></div>
+        <div class="hc-kpi"><div class="t">Vendido</div><div class="v">${Q(vendido)}</div></div>
         <div class="hc-kpi"><div class="t">Cobrado</div><div class="v">${Q(suma('pagado'))}</div></div>
         <div class="hc-kpi"><div class="t">Por cobrar</div><div class="v ${suma('saldo') > 0 ? 'neg' : ''}">${Q(suma('saldo'))}</div></div>
         <div class="hc-kpi"><div class="t">Ganancia real</div><div class="v ${signo(suma('ganancia_real'))}">${Q(suma('ganancia_real'))}</div></div>`;

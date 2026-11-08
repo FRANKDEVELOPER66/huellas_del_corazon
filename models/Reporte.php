@@ -541,13 +541,14 @@ class Reporte
     public static function pendientesPiezas(): array
     {
         $filas = ActiveRecord::fetchArray(
-            "SELECT v.id AS venta_id, v.descripcion, pt.id AS pintor_id, pt.nombre AS pintor, p.estado AS etapa,
+            "SELECT v.id AS venta_id, v.descripcion, cl.nombre AS cliente, pt.id AS pintor_id, pt.nombre AS pintor, p.estado AS etapa,
                     COALESCE(q.costo_pintura, 0) AS ac_pintura, COALESCE(q.costo_envio, 0) AS ac_envio, COALESCE(q.otros_insumos, 0) AS ac_otros,
                     q.envio_pintora AS env_pintora, q.envio_cliente AS env_cliente,
                     COALESCE(gp.pintura, 0) AS pg_pintura, COALESCE(gp.envio, 0) AS pg_envio, COALESCE(gp.otros, 0) AS pg_otros,
                     (cp.id IS NOT NULL) AS ce_pintura, (ce.id IS NOT NULL) AS ce_envio, (co.id IS NOT NULL) AS ce_otros
              FROM ventas v
              LEFT JOIN pedidos p ON p.id = v.pedido_id
+             LEFT JOIN clientes cl ON cl.id = COALESCE(v.cliente_id, p.cliente_id)
              LEFT JOIN cotizaciones q ON q.id = v.cotizacion_id
              LEFT JOIN pintores pt ON pt.id = q.pintor_id
              " . self::joinsCostos() . "
@@ -575,6 +576,7 @@ class Reporte
                     $pendientes[] = [
                         'venta_id'    => (int) $f['venta_id'],
                         'descripcion' => $f['descripcion'],
+                        'cliente'     => $f['cliente'],
                         'concepto'    => $c,
                         'pintor_id'   => $f['pintor_id'] ? (int) $f['pintor_id'] : null,
                         'pintor'      => $f['pintor'],

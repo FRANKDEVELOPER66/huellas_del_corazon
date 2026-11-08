@@ -733,7 +733,16 @@ async function cargarInventario() {
         : '<tr><td colspan="8" class="text-center text-muted py-2">Aún no hay materiales. Créalos en Catálogos > Materiales.</td></tr>';
 
     const filasCompras = d.compras.length
-        ? d.compras.map((c) => `
+        ? d.compras.map((c) => c.devuelta_en ? `
+            <tr style="background:#f8f9fa;color:#6c757d">
+                <td>${fecha(c.fecha)}</td>
+                <td><s>${esc(c.material)}</s>${detalleCarretes(c.id)}</td>
+                <td class="text-end"><s>${kgf(c.devuelta_kg)}</s></td>
+                <td class="text-end">—</td>
+                <td class="text-end"><s>${Q(c.devuelta_q)}</s></td>
+                <td><span class="hc-chip" style="background:#fde8e8;color:#b42318"><i class="bi bi-arrow-return-left"></i> Devuelta el ${fecha(c.devuelta_en)}</span>${c.devuelta_nota ? `<div class="hc-ayuda">${esc(c.devuelta_nota)}</div>` : ''}</td>
+                <td class="text-end text-nowrap">${c.comprobante ? `<a class="btn btn-sm btn-outline-secondary" href="${BASE}/API/gastos/comprobante?id=${c.gasto_id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}</td>
+            </tr>` : `
             <tr>
                 <td>${fecha(c.fecha)}</td>
                 <td>${esc(c.material)}${detalleCarretes(c.id)}</td>
@@ -744,6 +753,7 @@ async function cargarInventario() {
                 <td class="text-end text-nowrap">
                     ${c.comprobante ? `<a class="btn btn-sm btn-outline-secondary" href="${BASE}/API/gastos/comprobante?id=${c.gasto_id}" target="_blank" rel="noopener" title="Ver comprobante"><i class="bi bi-paperclip"></i></a>` : ''}
                     <button class="btn btn-sm btn-outline-dark" data-editar-compra="${c.id}" title="Editar"><i class="bi bi-pencil"></i></button>
+                    ${c.origen !== 'inicial' ? `<button class="btn btn-sm btn-outline-danger" data-devolver-compra="${c.id}" title="Devolví esta compra"><i class="bi bi-arrow-return-left"></i></button>` : ''}
                 </td>
             </tr>`).join('')
         : '<tr><td colspan="7" class="text-center text-muted py-2">Aún no registras compras ni inventario inicial.</td></tr>';
@@ -841,6 +851,7 @@ function filasCarretes(ks) {
             <td class="text-end text-nowrap">
                 <button class="btn btn-sm btn-outline-dark" data-peso-carrete="${k.id}" title="Corregir cuánto le queda"><i class="bi bi-speedometer2"></i></button>
                 <button class="btn btn-sm btn-outline-dark" data-color-carrete="${k.id}" title="Cambiar el color"><i class="bi bi-palette"></i></button>
+                ${k.agotado ? '' : `<button class="btn btn-sm btn-outline-dark" data-prueba-carrete="${k.id}" title="Registrar una impresión de prueba con este carrete"><i class="bi bi-eyedropper"></i></button>`}
             </td>
         </tr>`;
     }).join('');
@@ -880,7 +891,69 @@ function bloqueAvisos(d) {
                 : 'La merma de tus cotizaciones alcanza para cubrir tus fallas.'}</div>
         </div>`;
     }
-    return chips + alertas + merma;
+    const pr = d.pruebas || {};
+    let pruebas = '';
+    if (d.pruebas_ok && num(pr.cantidad) > 0) {
+        pruebas = `<div class="mt-3 p-2 rounded" style="background:#f3f0ff;border:1px solid #cfc4f5;border-left:5px solid #7048e8">
+            <div class="fw-bold mb-1" style="color:#5f3dc4"><i class="bi bi-eyedropper me-1"></i>Impresiones de prueba <span class="fw-normal small">(no son venta)</span></div>
+            <div class="small">En total: <b>${gr(pr.total_g)}</b> (${Q(pr.total_q)}) en ${pr.cantidad} ${pr.cantidad === 1 ? 'prueba' : 'pruebas'} · Este mes: <b>${gr(pr.mes_g)}</b> (${Q(pr.mes_q)})</div>
+            <div class="hc-ayuda">Ese filamento ya salió del inventario y baja el valor del negocio, pero <b>no se resta de tu ganancia</b>.</div>
+            <details class="mt-1"><summary class="small" style="cursor:pointer">Ver últimas pruebas</summary>
+                ${(pr.ultimas || []).map((u) => `<div class="small border-top pt-1 mt-1">${fecha(String(u.creado_en).slice(0, 10))} · ${puntoColor(u.color, 16)}<b>${esc(u.color)}</b> · ${gr(u.gramos)} (${Q(u.costo)}) <span class="hc-ayuda">${esc(String(u.motivo).replace(/^Prueba:?\s*/, ''))}</span></div>`).join('')}
+            </details>
+        </div>`;
+    }
+    return chips + alertas + merma + pruebas;
+}
+
+// Impresión de prueba: baja el filamento del carrete, no es venta y no resta de la ganancia
+async function formPrueba(kId) {
+    const ks = (inventario.carretes || []).filter((k) => !k.agotado);
+    if (!ks.length) return Swal.fire({ icon: 'info', text: 'No hay carretes con filamento.' });
+    const { value } = await Swal.fire({
+        titleText: 'Impresión de prueba',
+        html: `
+            <div class="text-start">
+                <div class="hc-ayuda mb-2">Descuenta filamento sin venta. Baja el inventario y el valor del negocio, <b>no tu ganancia</b>.</div>
+                <label class="form-label mb-1">Carrete que usaste</label>
+                <select id="pCarrete" class="form-select mb-2">
+                    ${ks.map((k) => `<option value="${k.id}" ${String(k.id) === String(kId) ? 'selected' : ''}>${esc(k.color)} · ${esc(k.material)} · le quedan ${gr(k.gramos_actuales)}</option>`).join('')}
+                </select>
+                <label class="form-label mb-1">Gramos que gastó (el total que marca Bambu Studio)</label>
+                <input id="pGramos" type="number" min="0" step="any" class="form-control mb-1" placeholder="Ej. 23.52">
+                <div id="pCosto" class="hc-ayuda mb-2"></div>
+                <label class="form-label mb-1">Nota (opcional)</label>
+                <input id="pNota" class="form-control" maxlength="200" placeholder="Ej. prueba de soportes árbol">
+            </div>`,
+        didOpen: (pop) => {
+            const calc = () => {
+                const k = ks.find((x) => String(x.id) === pop.querySelector('#pCarrete').value);
+                const g = parseFloat(pop.querySelector('#pGramos').value);
+                pop.querySelector('#pCosto').textContent = k && g > 0 ? `Valen ${Q((g * num(k.costo)) / num(k.peso_inicial_g))} según el costo de ese carrete.` : '';
+            };
+            pop.addEventListener('input', calc);
+            pop.addEventListener('change', calc);
+        },
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Descontar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: ORO,
+        preConfirm: () => {
+            const p = Swal.getPopup();
+            const id = p.querySelector('#pCarrete').value;
+            const gramos = parseFloat(p.querySelector('#pGramos').value);
+            const k = ks.find((x) => String(x.id) === id);
+            if (!(gramos > 0)) { Swal.showValidationMessage('Escribe los gramos'); return false; }
+            if (k && gramos > num(k.gramos_actuales)) { Swal.showValidationMessage(`Ese carrete solo tiene ${gr(k.gramos_actuales)}`); return false; }
+            return { id, gramos, nota: p.querySelector('#pNota').value.trim() };
+        },
+    });
+    if (!value) return;
+    const r = await post('inventario/prueba', value);
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    cargar();
 }
 
 const datalistColores = () => {
@@ -1075,6 +1148,38 @@ async function formCarretes(inicial) {
 }
 
 // Corregir cuánto le queda a un carrete (queda guardado el antes, el después y el motivo)
+// Devolución de una compra: el filamento sale del inventario y el dinero regresa (no se borra nada, queda marcada)
+async function devolverCompra(c) {
+    if (!c) return;
+    const destino = c.origen === 'bolsillo' ? 'a tu bolsillo (se quita de tus aportes)' : 'a la caja del negocio';
+    const { value } = await Swal.fire({
+        titleText: 'Devolver compra',
+        html: `
+            <div class="text-start">
+                <div class="mb-2"><b>${esc(c.material)}</b> · ${kgf(c.kg)} · <b>${Q(c.costo_total)}</b></div>
+                <div class="hc-ayuda mb-2">Los carretes de esta compra salen del inventario y los <b>${Q(c.costo_total)}</b> regresan ${destino}. La compra queda marcada como devuelta; no se borra. Solo se puede si el filamento no se ha usado.</div>
+                <label class="form-label mb-1">Fecha de la devolución</label>
+                <input id="dFecha" type="date" class="form-control mb-2" max="${hoy()}" value="${hoy()}">
+                <label class="form-label mb-1">Nota (opcional)</label>
+                <input id="dNota" class="form-control" maxlength="200" placeholder="Ej. llegó dañado, se devolvió en la tienda">
+            </div>`,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Sí, devolver',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#c92a4b',
+        preConfirm: () => {
+            const p = Swal.getPopup();
+            return { fecha: p.querySelector('#dFecha').value, nota: p.querySelector('#dNota').value.trim() };
+        },
+    });
+    if (!value) return;
+    const r = await post('inventario/devolver-compra', { id: c.id, ...value });
+    if (r.codigo !== 1) return error(r);
+    toast.fire({ icon: 'success', title: r.mensaje });
+    cargar();
+}
+
 async function ajustarPeso(k) {
     const { value } = await Swal.fire({
         titleText: `${k.color} · ${k.material}`,
@@ -1247,6 +1352,7 @@ async function formCompra(c = null, inicial = false) {
 
 on('btnComprar', 'click', () => formCompra());
 on('btnInicial', 'click', () => formCompra(null, true));
+on('btnPrueba', 'click', () => formPrueba());
 // Buscador de carretes: solo repinta las filas, así el cursor no se pierde
 function aplicarFiltroCarretes() {
     const tb = document.getElementById('tbodyCarretes');
@@ -1274,10 +1380,14 @@ on('inventario', 'click', (e) => {
         aplicarFiltroCarretes();
         return;
     }
+    const dev = e.target.closest('[data-devolver-compra]');
+    if (dev) return devolverCompra(inventario.compras.find((c) => String(c.id) === dev.dataset.devolverCompra));
     const ed = e.target.closest('[data-editar-compra]');
     const hist = e.target.closest('[data-hist-compra]');
     const peso = e.target.closest('[data-peso-carrete]');
     const col = e.target.closest('[data-color-carrete]');
+    const prueba = e.target.closest('[data-prueba-carrete]');
+    if (prueba) return formPrueba(prueba.dataset.pruebaCarrete);
     if (peso) ajustarPeso(inventario.carretes.find((k) => String(k.id) === peso.dataset.pesoCarrete));
     if (col) cambiarColor(inventario.carretes.find((k) => String(k.id) === col.dataset.colorCarrete));
     if (ed) formCompra(inventario.compras.find((c) => String(c.id) === ed.dataset.editarCompra));

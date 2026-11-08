@@ -1,7 +1,6 @@
 // Utilidades compartidas por las pantallas del cotizador (Ventas, Gastos, Pintores, Balance)
 import Swal from 'sweetalert2';
 
-
 export const ORO = '#c99a14';
 export const $ = (id) => document.getElementById(id);
 export const num = (n) => Number(n || 0);
@@ -162,4 +161,62 @@ export async function postGasto(post, ruta, datos) {
         r = await post(ruta, { ...datos, confirmar_duplicado: 1 });
     }
     return r;
+}
+
+// ---- Vista previa de comprobantes: se abre en una ventana grande encima de la pantalla, sin cambiar de página ----
+// Cualquier enlace a ".../comprobante?id=" se intercepta aquí (funciona también dentro de otros avisos, sin cerrarlos).
+function abrirVisorComprobante(url) {
+    if (document.getElementById('hcVisor')) return;
+    const fondo = document.createElement('div');
+    fondo.id = 'hcVisor';
+    fondo.style.cssText = 'position:fixed;inset:0;z-index:5000;background:rgba(15,15,15,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px';
+    fondo.innerHTML = `
+        <div style="width:min(1000px,96vw);height:min(90vh,900px);background:#fff;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+            <div style="background:#1c1c1c;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px">
+                <i class="bi bi-paperclip" style="color:#f6c33b;font-size:1.2rem"></i>
+                <b class="flex-grow-1">Comprobante</b>
+                <a href="${esc(url)}" target="_blank" rel="noopener" data-sin-visor class="btn btn-sm btn-outline-light"><i class="bi bi-box-arrow-up-right me-1"></i>Abrir aparte</a>
+                <button type="button" id="hcVisorCerrar" class="btn btn-sm" style="background:#f6c33b;color:#1c1c1c;font-weight:700"><i class="bi bi-x-lg me-1"></i>Cerrar</button>
+            </div>
+            <div id="hcVisorCuerpo" style="flex:1;overflow:auto;background:#2b2b2b;display:flex;align-items:center;justify-content:center;color:#ddd">Cargando…</div>
+        </div>`;
+    document.body.appendChild(fondo);
+
+    let blobUrl = null;
+    const cerrar = () => {
+        document.removeEventListener('keydown', alTeclear, true);
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        fondo.remove();
+    };
+    const alTeclear = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); cerrar(); }
+    };
+    document.addEventListener('keydown', alTeclear, true);
+    fondo.addEventListener('click', (e) => { if (e.target === fondo || e.target.closest('#hcVisorCerrar')) cerrar(); });
+
+    const cuerpo = fondo.querySelector('#hcVisorCuerpo');
+    fetch(url, { credentials: 'same-origin' })
+        .then((r) => { if (!r.ok) throw new Error(); return r.blob(); })
+        .then((b) => {
+            if (!document.getElementById('hcVisor')) return;
+            blobUrl = URL.createObjectURL(b);
+            if (b.type.startsWith('image/')) {
+                cuerpo.innerHTML = `<img src="${blobUrl}" alt="Comprobante" style="max-width:100%;max-height:100%;object-fit:contain">`;
+            } else if (b.type === 'application/pdf') {
+                cuerpo.innerHTML = `<iframe src="${blobUrl}" title="Comprobante" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
+            } else {
+                cuerpo.innerHTML = '<div class="p-4 text-center">Este tipo de archivo no se puede mostrar aquí.<br>Usa “Abrir aparte”.</div>';
+            }
+        })
+        .catch(() => { cuerpo.textContent = 'No se pudo cargar el comprobante.'; });
+}
+
+if (!window.__hcVisorComprobante) {
+    window.__hcVisorComprobante = true;
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest && e.target.closest('a[href*="/comprobante?id="]');
+        if (!a || a.hasAttribute('data-sin-visor') || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        abrirVisorComprobante(a.getAttribute('href'));
+    });
 }

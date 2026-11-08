@@ -51,9 +51,14 @@ class PedidosController
             "SELECT p.*, c.nombre AS cliente,
              v.id AS venta_id, v.precio_venta, qp.precio_sugerido AS precio_cotizado,
              COALESCE(pg.pagado, 0) AS pagado,
+             (SELECT MIN(x.fecha) FROM pagos x WHERE x.venta_id = v.id AND x.tipo = 'anticipo') AS anticipo_fecha,
+             (SELECT COALESCE(SUM(x.monto), 0) FROM pagos x WHERE x.venta_id = v.id AND x.tipo = 'anticipo') AS anticipo_monto,
+             (SELECT MAX(x.fecha) FROM pagos x WHERE x.venta_id = v.id AND x.monto > 0) AS ultimo_pago_fecha,
+             (SELECT COUNT(*) FROM pagos x WHERE x.venta_id = v.id) AS pagos_n,
              CASE WHEN p.estado = 'cancelado' THEN 0 ELSE v.precio_venta - COALESCE(pg.pagado, 0) END AS saldo,
              COALESCE(fa.gramos, 0) AS falla_g, COALESCE(fa.costo, 0) AS falla_q,
              cn.motivo AS cancel_motivo, cn.fecha AS cancel_fecha, cn.devuelto AS cancel_devuelto, cn.retenido AS cancel_retenido,
+             CASE WHEN COALESCE(q.costo_pintura, qp.costo_pintura, 0) <= 0.005 THEN 1 ELSE 0 END AS sin_pintura,
              CASE WHEN cp.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_pintura, 0) - COALESCE(gp.pintura, 0), 0) END AS falta_pintura,
              CASE WHEN ce.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.costo_envio, 0) - COALESCE(gp.envio, 0), 0) END AS falta_envio,
              CASE WHEN co.id IS NOT NULL THEN 0 ELSE GREATEST(COALESCE(q.otros_insumos, 0) - COALESCE(gp.otros, 0), 0) END AS falta_otros
@@ -172,6 +177,20 @@ class PedidosController
         self::responder(1, 'Pedido eliminado correctamente');
     }
 
+    // true si la cotización del pedido no tiene costo de pintura
+    private static function sinPintura(int $pedidoId): bool
+    {
+        $f = ActiveRecord::fetchArray(
+            "SELECT COALESCE(q.costo_pintura, 0) AS pintura
+             FROM pedidos p
+             LEFT JOIN ventas v ON v.pedido_id = p.id
+             LEFT JOIN cotizaciones q ON q.id = COALESCE(v.cotizacion_id, p.cotizacion_id)
+             WHERE p.id = ?",
+            [$pedidoId]
+        );
+        return $f && (float) $f[0]['pintura'] <= 0.005;
+    }
+
     // Pasa el pedido a la etapa SIGUIENTE. No hay vuelta atrás.
     // POST: id y desde (la etapa que el usuario veía): si ya cambió, no se aplica (evita dobles clics).
     public static function estadoAPI(Router $router): void
@@ -191,6 +210,10 @@ class PedidosController
         }
 
         $siguiente = self::SIGUIENTE[$pedido->estado] ?? null;
+        // Si la cotización no lleva pintura (costo Q0), la pieza se salta la etapa "En pintura"
+        if ($pedido->estado === 'impreso' && self::sinPintura((int)$pedido->id)) {
+            $siguiente = 'listo';
+        }
         if (!$siguiente) {
             self::responder(0, 'Este pedido ya está en una etapa final y no se puede cambiar');
         }

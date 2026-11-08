@@ -54,11 +54,17 @@ function avisoPintora(p) {
     return `<a href="${BASE}/gastos" class="small neg d-block mt-1" title="Regístralo en Gastos > Pagos pendientes"><i class="bi bi-exclamation-circle"></i> Falta pagar: ${faltas.map(([n, v]) => `${n} <b>${Q(v)}</b>`).join(' · ')}</a>`;
 }
 
+// Si la cotización no lleva pintura, desde Impreso se pasa directo a Listo para entregar
+function siguienteDe(p) {
+    if (p.estado === 'impreso' && Number(p.sin_pintura) === 1) return 'listo';
+    return ETAPAS[p.estado]?.siguiente;
+}
+
 function botonEtapa(p) {
     if (p.estado === 'listo') {
         return `<button class="btn btn-sm btn-hc w-100 mt-2" data-acc="finalizar" data-id="${p.id}"><i class="bi bi-flag-fill"></i> Finalizar venta</button>`;
     }
-    const sig = ETAPAS[p.estado]?.siguiente;
+    const sig = siguienteDe(p);
     if (sig) {
         return `<button class="btn btn-sm btn-outline-dark w-100 mt-2" data-acc="avanzar" data-id="${p.id}">Pasar a ${ETAPAS[sig].titulo} <i class="bi bi-arrow-right"></i></button>`;
     }
@@ -91,6 +97,7 @@ function tarjeta(p) {
                 ${conVenta || final ? '' : `<button class="btn btn-sm btn-link text-danger p-0" data-acc="eliminar" data-id="${p.id}" title="Eliminar"><i class="bi bi-trash"></i></button>`}
             </div>
             <div class="hc-ayuda">${esc(p.cliente)}</div>
+            ${p.estado === 'solicitado' && p.fecha_pedido ? `<div class="small"><i class="bi bi-clock-history me-1"></i>Solicitado el <b>${fecha(p.fecha_pedido)}</b></div>` : ''}
             ${p.fecha_entrega ? `<div class="small ${vencido ? 'neg fw-bold' : ''}"><i class="bi bi-calendar-event me-1"></i>${fecha(p.fecha_entrega)}${vencido ? ' · atrasado' : ''}</div>` : ''}
             ${dinero}
             ${cancelado ? '' : avisoPintora(p)}
@@ -108,13 +115,63 @@ function tarjeta(p) {
         </div>`;
 }
 
+// Tarjeta de un pedido entregado: línea de tiempo con anticipo, pago completo y entrega
+function tarjetaEntregada(p) {
+    const conVenta = Boolean(p.venta_id);
+    const paso = (texto, fechaTxt, extra = '') => `<li class="${fechaTxt ? '' : 'vacio'}">${texto}: <b>${fechaTxt ? fecha(fechaTxt) : 'sin registro'}</b>${extra}</li>`;
+    const sinAnticipo = !p.anticipo_fecha;
+    return `
+        <div class="tarjeta tarjeta-entregada">
+            <div class="d-flex justify-content-between align-items-start">
+                <b>${esc(p.nombre_mascota)}</b>
+                <span class="hc-chip"><i class="bi bi-lock-fill"></i> Entregado</span>
+            </div>
+            <div class="hc-ayuda">${esc(p.cliente)}</div>
+            ${conVenta ? `<div class="small mt-1">Total <b>${Q(p.precio_venta)}</b> · Cobrado <b class="pos">${Q(p.pagado)}</b></div>` : ''}
+            <ul class="linea-tiempo">
+                ${paso('Pedido', p.fecha_pedido)}
+                ${sinAnticipo ? '<li class="vacio">Anticipo: <b>sin anticipo</b> (se pagó al final)</li>' : paso('Anticipo', p.anticipo_fecha, ` · ${Q(p.anticipo_monto)}`)}
+                ${paso('Pagado completo', p.ultimo_pago_fecha)}
+                ${paso('Entregado', p.entregado_en)}
+            </ul>
+            ${num(p.falla_g) > 0 ? `<div class="small neg"><i class="bi bi-x-octagon-fill"></i> Fallas: <b>${gr(p.falla_g)}</b> · ${Q(p.falla_q)} extra</div>` : ''}
+            ${p.notas ? `<div class="hc-ayuda mt-1">${esc(p.notas)}</div>` : ''}
+            ${conVenta ? `<button class="btn btn-sm btn-hc w-100 mt-2" data-acc="cobros" data-id="${p.id}"><i class="bi bi-cash-coin"></i> Ver cobros y comprobantes</button>` : ''}
+        </div>`;
+}
+
+function pintarEntregados() {
+    const lista = pedidos
+        .filter((p) => p.estado === 'entregado')
+        .sort((a, b) => String(b.entregado_en || '').localeCompare(String(a.entregado_en || '')) || b.id - a.id);
+    $('nEntregados').textContent = lista.length ? `· ${lista.length}` : '';
+    $('entregados').innerHTML = lista.length
+        ? lista.map(tarjetaEntregada).join('')
+        : '<div class="hc-ayuda">Todavía no has entregado ningún pedido. Cuando finalices una venta aparecerá aquí.</div>';
+}
+
+function pintarCancelados() {
+    const lista = pedidos
+        .filter((p) => p.estado === 'cancelado')
+        .sort((a, b) => String(b.cancel_fecha || '').localeCompare(String(a.cancel_fecha || '')) || b.id - a.id);
+    $('cabCancelados').style.display = lista.length ? '' : 'none';
+    $('nCancelados').textContent = lista.length ? `· ${lista.length}` : '';
+    $('cancelados').innerHTML = lista.map((p) => tarjeta(p).replace('class="tarjeta"', 'class="tarjeta tarjeta-cancelada"')).join('');
+}
+
 function pintar() {
-    // “Cancelado” solo aparece si hay pedidos cancelados
-    const claves = Object.keys(ETAPAS).filter((k) => k !== 'cancelado' || pedidos.some((p) => p.estado === 'cancelado'));
+    // “Entregado” y “Cancelado” van cada uno en su propia sección abajo del tablero
+    const claves = Object.keys(ETAPAS).filter((k) => k !== 'entregado' && k !== 'cancelado');
+    pintarEntregados();
+    pintarCancelados();
 
     $('tablero').innerHTML = claves.map((clave) => {
         const e = ETAPAS[clave];
         const lista = pedidos.filter((p) => p.estado === clave);
+        // En Solicitado el más antiguo va primero (el que se pidió hace más tiempo tiene prioridad)
+        if (clave === 'solicitado') {
+            lista.sort((a, b) => String(a.fecha_pedido).localeCompare(String(b.fecha_pedido)) || a.id - b.id);
+        }
         return `
         <div class="columna">
             <h3><span>${e.titulo}</span><span>${lista.length}</span></h3>
@@ -127,9 +184,10 @@ function pintar() {
 // ── Pasar a la siguiente etapa (con confirmación, sin regreso) ──────────────
 async function avanzar(p) {
     const actual = ETAPAS[p.estado];
-    const sig = ETAPAS[actual.siguiente];
+    const sig = ETAPAS[siguienteDe(p)];
 
     let aviso = '';
+    if (p.estado === 'impreso' && siguienteDe(p) === 'listo') aviso = '<div class="hc-ayuda mt-2">Esta pieza no lleva pintura en la cotización: se salta “En pintura”.</div>';
     if (p.estado === 'solicitado') {
         if (!p.venta_id) aviso = '<div class="neg mt-2"><b>Este pedido todavía no tiene venta registrada.</b></div>';
         else if (num(p.pagado) > 0) aviso = `<div class="pos mt-2">Anticipo registrado: <b>${Q(p.pagado)}</b></div>`;
@@ -562,7 +620,7 @@ async function eliminar(p) {
 
 // ── Eventos ─────────────────────────────────────────────────────────────────
 $('btnNuevo').addEventListener('click', () => formPedido());
-$('tablero').addEventListener('click', (e) => {
+function alHacerClic(e) {
     const btn = e.target.closest('[data-acc]');
     if (!btn) return;
     const p = pedidos.find((x) => String(x.id) === btn.dataset.id);
@@ -577,6 +635,8 @@ $('tablero').addEventListener('click', (e) => {
     if (acc === 'cobros') cobros(p);
     if (acc === 'venta') registrarVenta(p);
     if (acc === 'eliminar') eliminar(p);
-});
+}
+$('tablero').addEventListener('click', alHacerClic);
+$('entregados').addEventListener('click', alHacerClic);
 
 cargar();

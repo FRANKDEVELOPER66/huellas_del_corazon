@@ -38,7 +38,7 @@ class AlertasController
                 'nivel'   => $trabajo ? 'alta' : 'media',
                 'icono'   => $p['concepto'] === 'pintura' ? 'bi-palette' : ($p['concepto'] === 'envio' ? 'bi-truck' : 'bi-bag'),
                 'titulo'  => $titulo,
-                'detalle' => 'Pieza ' . $p['descripcion'] . ($p['etapa'] ? ' · ' . (self::ETAPAS[$p['etapa']] ?? $p['etapa']) : ''),
+                'detalle' => 'Pieza ' . $p['descripcion'] . (!empty($p['cliente']) ? ' · ' . $p['cliente'] : '') . ($p['etapa'] ? ' · ' . (self::ETAPAS[$p['etapa']] ?? $p['etapa']) : ''),
                 'monto'   => (float) $p['pendiente'],
                 'url'     => '/gastos#pagos-pendientes',
                 'orden'   => $trabajo ? 1 : 3,
@@ -101,16 +101,23 @@ class AlertasController
             );
             foreach ($recs as $r) {
                 $dias = $r['dias_para'] === null ? null : (int) $r['dias_para'];
-                $cuando = $dias === null ? '' : ($dias < 0 ? ' · venció hace ' . abs($dias) . ($dias === -1 ? ' día' : ' días') : ($dias === 0 ? ' · vence hoy' : ' · vence mañana'));
+                $etiqueta = null;
+                if ($dias !== null) {
+                    $etiqueta = $dias < 0
+                        ? ['texto' => 'Venció hace ' . abs($dias) . ($dias === -1 ? ' día' : ' días'), 'clase' => 'vencido']
+                        : ($dias === 0 ? ['texto' => 'Vence HOY', 'clase' => 'hoy'] : ['texto' => 'Vence mañana', 'clase' => 'manana']);
+                }
                 $alertas[] = [
                     'tipo'    => 'recordatorio',
                     'nivel'   => ($r['prioridad'] === 'urgente' || ($dias !== null && $dias <= 0)) ? 'alta' : 'media',
                     'icono'   => 'bi-journal-check',
                     'titulo'  => $r['texto'],
-                    'detalle' => ($tipos[$r['tipo']] ?? 'Recordatorio') . ($r['cotizacion'] ? ' · ' . $r['cotizacion'] : ($r['cliente'] ? ' · ' . $r['cliente'] : '')) . $cuando,
+                    'detalle' => ($tipos[$r['tipo']] ?? 'Recordatorio') . ($r['cotizacion'] ? ' · ' . $r['cotizacion'] : '') . ($r['cliente'] ? ' · ' . $r['cliente'] : ''),
+                    'etiqueta' => $etiqueta,
                     'monto'   => null,
                     'url'     => '/recordatorios',
-                    'orden'   => ($dias !== null && $dias < 0) ? 1 : 2,
+                    'orden'   => $dias === null ? 2 : 0,
+                    'dias'    => $dias ?? 0,
                 ];
             }
         }
@@ -143,7 +150,8 @@ class AlertasController
         }
         usort($pedidos, fn($a, $b) => [-$a['paso'], $a['id']] <=> [-$b['paso'], $b['id']]);
 
-        usort($alertas, fn($a, $b) => [$a['orden'], -($a['monto'] ?? 0)] <=> [$b['orden'], -($b['monto'] ?? 0)]);
+        // Primero lo que tiene fecha (vencidos, hoy, mañana), luego el resto por importancia
+        usort($alertas, fn($a, $b) => [$a['orden'], $a['dias'] ?? 0, -($a['monto'] ?? 0)] <=> [$b['orden'], $b['dias'] ?? 0, -($b['monto'] ?? 0)]);
 
         self::responder(1, '', [
             'datos'  => $alertas,
