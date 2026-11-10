@@ -35,6 +35,7 @@ class AlertasController
             };
             $alertas[] = [
                 'tipo'    => 'pago',
+                'grupo'   => $p['concepto'] === 'envio' ? 'envios' : 'cobros',
                 'nivel'   => $trabajo ? 'alta' : 'media',
                 'icono'   => $p['concepto'] === 'pintura' ? 'bi-palette' : ($p['concepto'] === 'envio' ? 'bi-truck' : 'bi-bag'),
                 'titulo'  => $titulo,
@@ -59,6 +60,7 @@ class AlertasController
             $saldo = (float) $l['saldo'];
             $alertas[] = [
                 'tipo'    => 'entrega',
+                'grupo'   => $saldo > 0.005 ? 'cobros' : 'envios',
                 'nivel'   => $saldo > 0.005 ? 'alta' : 'media',
                 'icono'   => 'bi-box-seam',
                 'titulo'  => $saldo > 0.005 ? 'Cobrar y entregar' : 'Entregar y finalizar la venta',
@@ -74,6 +76,7 @@ class AlertasController
             foreach (Inventario::alertasColores() as $a) {
                 $alertas[] = [
                     'tipo'    => 'filamento',
+                    'grupo'   => 'recordatorios',
                     'nivel'   => $a['agotado'] ? 'alta' : 'media',
                     'icono'   => 'bi-boxes',
                     'titulo'  => $a['agotado'] ? 'Se acabó el ' . $a['color'] : 'Por acabarse: ' . $a['color'],
@@ -105,10 +108,13 @@ class AlertasController
                 if ($dias !== null) {
                     $etiqueta = $dias < 0
                         ? ['texto' => 'Venció hace ' . abs($dias) . ($dias === -1 ? ' día' : ' días'), 'clase' => 'vencido']
-                        : ($dias === 0 ? ['texto' => 'Vence HOY', 'clase' => 'hoy'] : ['texto' => 'Vence mañana', 'clase' => 'manana']);
+                        : ($dias === 0 ? ['texto' => 'Vence HOY', 'clase' => 'hoy']
+                            : ($dias === 1 ? ['texto' => 'Vence mañana', 'clase' => 'manana']
+                                           : ['texto' => 'Vence en ' . $dias . ' días', 'clase' => 'pronto']));
                 }
                 $alertas[] = [
                     'tipo'    => 'recordatorio',
+                    'grupo'   => 'recordatorios',
                     'nivel'   => ($r['prioridad'] === 'urgente' || ($dias !== null && $dias <= 0)) ? 'alta' : 'media',
                     'icono'   => 'bi-journal-check',
                     'titulo'  => $r['texto'],
@@ -153,7 +159,15 @@ class AlertasController
         // Primero lo que tiene fecha (vencidos, hoy, mañana), luego el resto por importancia
         usort($alertas, fn($a, $b) => [$a['orden'], $a['dias'] ?? 0, -($a['monto'] ?? 0)] <=> [$b['orden'], $b['dias'] ?? 0, -($b['monto'] ?? 0)]);
 
+        // Cada campana (Cobros y pagos, Envíos, Recordatorios) cuenta lo suyo
+        $grupos = [];
+        foreach (['cobros', 'envios', 'recordatorios'] as $g) {
+            $de = array_filter($alertas, fn($a) => ($a['grupo'] ?? '') === $g);
+            $grupos[$g] = ['total' => count($de), 'urgentes' => count(array_filter($de, fn($a) => $a['nivel'] === 'alta'))];
+        }
+
         self::responder(1, '', [
+            'grupos' => $grupos,
             'datos'  => $alertas,
             'total'  => count($alertas),
             'urgentes' => count(array_filter($alertas, fn($a) => $a['nivel'] === 'alta')),

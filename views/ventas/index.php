@@ -39,6 +39,32 @@ include __DIR__ . '/../partials/hc-estilos.php';
         </div>
         <p class="hc-ayuda mt-2 mb-0">Mientras falte pagar la pintora, el envío u otros insumos de una pieza, su ganancia usa el costo de la cotización y aparece marcada como “est.”. Regístralos en Gastos > Pagos pendientes y se vuelve real.</p>
     </div>
+
+    <div class="hc-header mt-4" id="cabCanceladas" style="display:none">
+        <div class="icon-wrap" style="color:#ff8a8a;background:rgba(255,100,100,.12);border-color:rgba(255,100,100,.35)"><i class="bi bi-x-circle"></i></div>
+        <div>
+            <h1>Canceladas <span id="nCanceladas" style="color:#ff8a8a"></span></h1>
+            <p>Ventas canceladas: no cuentan como vendido ni como por cobrar. Lo retenido es ingreso del mes de la cancelación</p>
+        </div>
+    </div>
+    <div class="hc-card" id="cardCanceladas" style="display:none">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 hc-tabla-nw" id="tablaCanceladas">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Pieza</th>
+                        <th>Cliente</th>
+                        <th class="text-end">Precio</th>
+                        <th class="text-end">Cobrado</th>
+                        <th class="text-end">Gan. real</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <script src="<?= asset('build/js/ventas/index.js') ?>" type="module"></script>

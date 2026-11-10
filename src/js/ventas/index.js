@@ -15,25 +15,23 @@ async function cargar() {
 }
 
 function pintar() {
+    const esCancel = (v) => v.estado_pedido === 'cancelado';
+    const activas = ventas.filter((v) => !esCancel(v));
+    const canceladas = ventas.filter(esCancel);
     const suma = (campo) => ventas.reduce((s, v) => s + num(v[campo]), 0);
-    // Las ventas canceladas ya no son venta: no cuentan en “Vendido”
-    const vendido = ventas.filter((v) => v.estado_pedido !== 'cancelado').reduce((s, v) => s + num(v.precio_venta), 0);
+    const vendido = activas.reduce((s, v) => s + num(v.precio_venta), 0);
+    const porCobrar = activas.reduce((s, v) => s + num(v.saldo), 0);
     $('kpis').innerHTML = `
         <div class="hc-kpi"><div class="t">Vendido</div><div class="v">${Q(vendido)}</div></div>
         <div class="hc-kpi"><div class="t">Cobrado</div><div class="v">${Q(suma('pagado'))}</div></div>
-        <div class="hc-kpi"><div class="t">Por cobrar</div><div class="v ${suma('saldo') > 0 ? 'neg' : ''}">${Q(suma('saldo'))}</div></div>
+        <div class="hc-kpi"><div class="t">Por cobrar</div><div class="v ${porCobrar > 0 ? 'neg' : ''}">${Q(porCobrar)}</div></div>
         <div class="hc-kpi"><div class="t">Ganancia real</div><div class="v ${signo(suma('ganancia_real'))}">${Q(suma('ganancia_real'))}</div></div>`;
 
     const cuerpo = document.querySelector('#tablaVentas tbody');
-    if (!ventas.length) {
-        cuerpo.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No hay ventas en este periodo.</td></tr>';
-        return;
-    }
-
-    cuerpo.innerHTML = ventas.map((v) => `
+    cuerpo.innerHTML = activas.length ? activas.map((v) => `
         <tr>
             <td>${fecha(v.fecha_venta)}</td>
-            <td><b>${esc(v.descripcion)}</b>${v.estado_pedido === 'cancelado' ? ' <span class="hc-chip" style="background:#fde8e8;color:#b42318">Cancelada</span>' : ''}</td>
+            <td><b>${esc(v.descripcion)}</b></td>
             <td>${esc(v.cliente)}</td>
             <td class="text-end fw-bold">${Q0(v.precio_venta)}</td>
             <td class="text-end">${Q(v.pagado)}</td>
@@ -41,6 +39,20 @@ function pintar() {
             <td class="text-end">${v.ganancia_estimada === null ? '—' : Q(v.ganancia_estimada)}</td>
             <td class="text-end fw-bold ${signo(v.ganancia_real)}">${Q(v.ganancia_real)}${num(v.gastos_pendientes) === 1 ? ' <span class="hc-chip" title="Aún no registras los gastos de esta pieza: se usan los de la cotización">est.</span>' : ''}</td>
             <td class="text-end">${v.margen_real_pct === null ? '—' : `${num(v.margen_real_pct)}%`}</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-dark" data-detalle="${v.id}"><i class="bi bi-eye"></i> Detalle</button></td>
+        </tr>`).join('') : '<tr><td colspan="10" class="text-center text-muted py-3">No hay ventas en este periodo.</td></tr>';
+
+    $('cabCanceladas').style.display = canceladas.length ? '' : 'none';
+    $('cardCanceladas').style.display = canceladas.length ? '' : 'none';
+    $('nCanceladas').textContent = canceladas.length ? `· ${canceladas.length}` : '';
+    document.querySelector('#tablaCanceladas tbody').innerHTML = canceladas.map((v) => `
+        <tr>
+            <td>${fecha(v.fecha_venta)}</td>
+            <td><b>${esc(v.descripcion)}</b> <span class="hc-chip" style="background:#fde8e8;color:#b42318">Cancelada</span></td>
+            <td>${esc(v.cliente)}</td>
+            <td class="text-end">${Q0(v.precio_venta)}</td>
+            <td class="text-end">${Q(v.pagado)}</td>
+            <td class="text-end fw-bold ${signo(v.ganancia_real)}">${Q(v.ganancia_real)}</td>
             <td class="text-end"><button class="btn btn-sm btn-outline-dark" data-detalle="${v.id}"><i class="bi bi-eye"></i> Detalle</button></td>
         </tr>`).join('');
 }
@@ -248,7 +260,7 @@ async function eliminarVenta(v) {
 
 // ── Eventos ─────────────────────────────────────────────────────────────────
 $('mes').addEventListener('change', cargar);
-$('tablaVentas').addEventListener('click', (e) => {
+$('appVentas').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-detalle]');
     if (btn) detalle(btn.dataset.detalle);
 });

@@ -69,6 +69,8 @@ $router->post('/API/pedidos/eliminar',      [PedidosController::class, 'eliminar
 $router->post('/API/pedidos/finalizar', [PedidosController::class, 'finalizarAPI']);
 $router->get('/API/pedidos/cancelacion', [PedidosController::class, 'cancelacionAPI']);
 $router->post('/API/pedidos/cancelar',   [PedidosController::class, 'cancelarAPI']);
+$router->get('/API/pedidos/filamento',    [PedidosController::class, 'filamentoAPI']);
+
 
 
 // ---- API: gastos ----
@@ -137,6 +139,7 @@ $router->get('/inventario',     [InventarioController::class, 'index']);
 
 $router->post('/API/inventario/carrete-peso',  [InventarioController::class, 'carretePesoAPI']);
 $router->post('/API/inventario/carrete-color', [InventarioController::class, 'carreteColorAPI']);
+
 
 // ---- Carretes · paso 2 (InventarioController y PedidosController ya están importados) ----
 $router->get('/API/inventario/colores',   [InventarioController::class, 'coloresAPI']);

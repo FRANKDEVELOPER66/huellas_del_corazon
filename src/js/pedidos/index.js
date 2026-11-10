@@ -1,5 +1,5 @@
 import Swal from 'sweetalert2';
-import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, fecha, cobrarVenta, editarPago } from '../comun.js';
+import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, fecha, cobrarVenta, editarPago, puntoColor } from '../comun.js';
 
 const BASE = $('appPedidos').dataset.base || '';
 const { get, post } = crearApi(BASE);
@@ -71,6 +71,8 @@ function botonEtapa(p) {
     return p.estado === 'entregado' ? '<div class="hc-ayuda mt-2"><i class="bi bi-lock-fill"></i> Entregado: ya no se puede cambiar</div>' : '';
 }
 
+const btnFilamento = (p) => `<button class="btn btn-sm btn-outline-secondary py-0 px-2" data-acc="filamento" data-id="${p.id}" title="Ver filamento de esta pieza"><i class="bi bi-hypnotize"></i></button>`;
+
 function tarjeta(p) {
     const conVenta = Boolean(p.venta_id);
     const saldo = num(p.saldo);
@@ -85,7 +87,7 @@ function tarjeta(p) {
            ${p.cancel_motivo ? `<div class="hc-ayuda">${esc(p.cancel_motivo)}</div>` : ''}`
         : conVenta
         ? `<div class="d-flex justify-content-between small mt-1">
-               <span>${Q(p.precio_venta)}</span>
+               <span class="fs-5 fw-bold">${Q(p.precio_venta)}</span>
                ${debe ? `<span class="neg fw-bold">Debe ${Q(saldo)}</span>` : '<span class="pos"><i class="bi bi-check-circle-fill"></i> Pagado</span>'}
            </div>`
         : '<div class="hc-ayuda mt-1">Sin venta registrada</div>';
@@ -94,7 +96,10 @@ function tarjeta(p) {
         <div class="tarjeta">
             <div class="d-flex justify-content-between align-items-start">
                 <b>${esc(p.nombre_mascota)}</b>
-                ${conVenta || final ? '' : `<button class="btn btn-sm btn-link text-danger p-0" data-acc="eliminar" data-id="${p.id}" title="Eliminar"><i class="bi bi-trash"></i></button>`}
+                <span class="d-flex gap-2 align-items-center">
+                    ${btnFilamento(p)}
+                    ${conVenta || final ? '' : `<button class="btn btn-sm btn-link text-danger p-0" data-acc="eliminar" data-id="${p.id}" title="Eliminar"><i class="bi bi-trash"></i></button>`}
+                </span>
             </div>
             <div class="hc-ayuda">${esc(p.cliente)}</div>
             ${p.estado === 'solicitado' && p.fecha_pedido ? `<div class="small"><i class="bi bi-clock-history me-1"></i>Solicitado el <b>${fecha(p.fecha_pedido)}</b></div>` : ''}
@@ -124,10 +129,10 @@ function tarjetaEntregada(p) {
         <div class="tarjeta tarjeta-entregada">
             <div class="d-flex justify-content-between align-items-start">
                 <b>${esc(p.nombre_mascota)}</b>
-                <span class="hc-chip"><i class="bi bi-lock-fill"></i> Entregado</span>
+                <span class="d-flex gap-2 align-items-center">${btnFilamento(p)}<span class="hc-chip"><i class="bi bi-lock-fill"></i> Entregado</span></span>
             </div>
             <div class="hc-ayuda">${esc(p.cliente)}</div>
-            ${conVenta ? `<div class="small mt-1">Total <b>${Q(p.precio_venta)}</b> · Cobrado <b class="pos">${Q(p.pagado)}</b></div>` : ''}
+            ${conVenta ? `<div class="small mt-1">Total <b class="fs-5">${Q(p.precio_venta)}</b> · Cobrado <b class="pos">${Q(p.pagado)}</b></div>` : ''}
             <ul class="linea-tiempo">
                 ${paso('Pedido', p.fecha_pedido)}
                 ${sinAnticipo ? '<li class="vacio">Anticipo: <b>sin anticipo</b> (se pagó al final)</li>' : paso('Anticipo', p.anticipo_fecha, ` · ${Q(p.anticipo_monto)}`)}
@@ -182,6 +187,45 @@ function pintar() {
 }
 
 // ── Pasar a la siguiente etapa (con confirmación, sin regreso) ──────────────
+// Vista previa de lo que se va a gastar de filamento (para no mandar a imprimir con colores equivocados)
+async function vistaPreviaFilamento(p) {
+    const [r, inv] = await Promise.all([get('pedidos/filamento', { id: p.id }), get('inventario/colores')]);
+    const recordatorio = `<div class="text-start mt-2 p-2 rounded" style="background:#eef4ff;border:1px solid #b9cdf5;border-left:5px solid #1d4ed8">
+        <i class="bi bi-printer-fill"></i> <b>Primero envía la impresión en Bambu Studio</b> y después confirma aquí. Compara los colores y gramos de abajo con tu laminado.</div>`;
+    if (r.codigo !== 1 || !r.datos.partes.length) {
+        return `<div class="text-start p-2 rounded" style="background:#fff4f6;border:1px solid #f1b5c4;border-left:5px solid #d6336c">
+            <b>No hay detalle de filamento</b> (${r.datos?.sin_cotizacion ? 'el pedido no tiene cotización ligada' : 'la cotización no tiene partes'}). No se descontará nada del inventario: revisa qué vas a imprimir.</div>${recordatorio}`;
+    }
+    const merma = num(r.datos.merma_pct);
+    const stock = inv.codigo === 1 ? inv.datos || [] : [];
+    const porColor = {};
+    r.datos.partes.forEach((x) => {
+        const k = `${x.material_id}|${x.color || ''}`;
+        porColor[k] ??= { color: x.color, material: x.material, material_id: x.material_id, g: 0 };
+        porColor[k].g += num(x.gramos);
+    });
+    const lista = Object.values(porColor).sort((a, b) => b.g - a.g);
+    const filas = lista.map((c) => {
+        const gReal = c.g * (1 + merma / 100);
+        const hay = stock.find((x) => String(x.material_id) === String(c.material_id) && x.color === c.color);
+        const queda = hay ? num(hay.gramos) : 0;
+        const falta = gReal > queda;
+        return `<div class="d-flex justify-content-between align-items-center py-1" style="border-bottom:1px solid #eee">
+            <span>${puntoColor(c.color, 22)}<b>${esc(c.color || 'Sin color')}</b> <span class="hc-ayuda">${esc(c.material)}</span></span>
+            <span class="text-end"><b>${c.g.toFixed(1)} g</b>${merma > 0 ? ` <span class="hc-ayuda">(≈ ${gReal.toFixed(0)} g con merma)</span>` : ''}
+                <div class="small ${falta ? 'neg fw-bold' : 'hc-ayuda'}">${falta ? `<i class="bi bi-exclamation-triangle-fill"></i> Solo hay ${queda.toFixed(0)} g en inventario` : `En inventario: ${queda.toFixed(0)} g`}</div></span></div>`;
+    }).join('');
+    const total = lista.reduce((t, c) => t + c.g, 0);
+    const multi = lista.length > 1;
+    return `<div class="text-start">
+        <h6 class="mb-1">Filamento que se va a descontar${multi ? ` · <span class="neg">${lista.length} colores</span>` : ''}</h6>
+        ${filas}
+        <div class="d-flex justify-content-between pt-1"><b>Total</b><b>${total.toFixed(1)} g</b></div>
+    </div>${recordatorio}
+    <div class="text-start mt-2 p-2 rounded" style="background:#fff8e6;border:1px solid #f0d58a;border-left:5px solid #c99a14">
+        <i class="bi bi-eye-fill"></i> <b>Revisa bien:</b> ¿los colores y la cantidad de colores coinciden con lo que vas a imprimir? Si la cotización quedó incompleta, cancela y corrígela antes.</div>`;
+}
+
 async function avanzar(p) {
     const actual = ETAPAS[p.estado];
     const sig = ETAPAS[siguienteDe(p)];
@@ -194,15 +238,42 @@ async function avanzar(p) {
         else aviso = '<div class="neg mt-2"><b>Todavía no hay anticipo registrado.</b></div>';
     }
 
+    // Al pasar a Imprimiendo se descuenta el filamento: se muestra qué va a salir y se confirma con calma
+    const imprime = p.estado === 'solicitado';
+    let previa = '';
+    if (imprime) previa = await vistaPreviaFilamento(p);
+
     const { isConfirmed } = await Swal.fire({
-        icon: 'question',
+        icon: imprime ? 'warning' : 'question',
         titleText: `¿Pasar “${p.nombre_mascota}” a ${sig.titulo}?`,
-        html: `<div>Esta acción <b>no se puede deshacer</b>: el pedido ya no podrá regresar a “${esc(actual.titulo)}”.</div>${aviso}`,
+        width: imprime ? 640 : undefined,
+        html: `${previa}<div class="${imprime ? 'mt-3' : ''}">Esta acción <b>no se puede deshacer</b>: el pedido ya no podrá regresar a “${esc(actual.titulo)}”.</div>${aviso}`,
         showCancelButton: true,
         focusCancel: true,
         confirmButtonText: `Sí, pasar a ${sig.titulo}`,
         cancelButtonText: 'Cancelar',
         confirmButtonColor: ORO,
+        // Solo al pasar a Imprimiendo: el botón se activa a los 3 segundos
+        didOpen: imprime ? () => {
+            const btn = Swal.getConfirmButton();
+            const texto = `Sí, pasar a ${sig.titulo}`;
+            let seg = 3;
+            btn.disabled = true;
+            btn.textContent = `${texto} (${seg})`;
+            const reloj = setInterval(() => {
+                seg -= 1;
+                if (seg <= 0) {
+                    clearInterval(reloj);
+                    btn.disabled = false;
+                    btn.textContent = texto;
+                } else {
+                    btn.textContent = `${texto} (${seg})`;
+                }
+            }, 1000);
+            // si se cierra antes, se detiene el reloj
+            const cierre = new MutationObserver(() => { if (!document.body.contains(btn)) { clearInterval(reloj); cierre.disconnect(); } });
+            cierre.observe(document.body, { childList: true, subtree: true });
+        } : undefined,
     });
     if (!isConfirmed) return;
 
@@ -224,6 +295,72 @@ function avisarFilamento(alertas) {
         title: 'Filamento por acabarse',
         html: `<div class="text-start">${alertas.map((a) => `<div class="mb-1">${textoAlerta(a)}</div>`).join('')}</div>`,
         confirmButtonText: 'Entendido',
+        confirmButtonColor: ORO,
+    });
+}
+
+// ── Filamento de la pieza: qué lleva según la cotización y qué ya salió del inventario ──
+const hrs = (min) => {
+    const m = Math.round(num(min));
+    return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+};
+
+async function filamento(p) {
+    const r = await get('pedidos/filamento', { id: p.id });
+    if (r.codigo !== 1) return error(r);
+    const { partes, consumos, sin_cotizacion: sinCot, merma_pct: merma } = r.datos;
+
+    if (!partes.length) {
+        return Swal.fire({
+            icon: 'info', titleText: p.nombre_mascota, confirmButtonColor: ORO,
+            text: sinCot ? 'Este pedido no tiene cotización ligada, así que no hay detalle de filamento.' : 'La cotización no tiene partes registradas.',
+        });
+    }
+
+    const filas = partes.map((x) => `<tr>
+        <td>${esc(x.nombre || '—')}</td>
+        <td class="text-nowrap">${puntoColor(x.color, 16)}${esc(x.color || '—')} <span class="hc-ayuda">${esc(x.material)}</span></td>
+        <td class="text-end text-nowrap">${num(x.gramos).toFixed(2)} g</td>
+        <td class="text-end text-nowrap">${hrs(x.minutos)}</td></tr>`).join('');
+
+    // Total por color (suma las partes del mismo color)
+    const porColor = {};
+    partes.forEach((x) => {
+        const k = `${x.color || ''}|${x.material}`;
+        porColor[k] ??= { color: x.color, material: x.material, g: 0 };
+        porColor[k].g += num(x.gramos);
+    });
+    const lista = Object.values(porColor).sort((a, b) => b.g - a.g);
+    const totalG = lista.reduce((s, c) => s + c.g, 0);
+    const totalMin = partes.reduce((s, x) => s + num(x.minutos), 0);
+    const chips = lista.map((c) => `<div class="d-flex justify-content-between align-items-center py-1" style="border-bottom:1px solid #eee">
+        <span>${puntoColor(c.color, 22)}<b>${esc(c.color || 'Sin color')}</b> <span class="hc-ayuda">${esc(c.material)}</span></span>
+        <b>${c.g.toFixed(2)} g</b></div>`).join('');
+
+    const real = (consumos || []);
+    const piezaG = real.filter((c) => c.tipo === 'pieza').reduce((s, c) => s + num(c.gramos), 0);
+    const fallaG = real.filter((c) => c.tipo === 'falla').reduce((s, c) => s + num(c.gramos), 0);
+    const bloqueReal = real.length ? `
+        <h6 class="mt-3">Ya descontado del inventario</h6>
+        ${real.map((c) => `<div class="d-flex justify-content-between py-1" style="border-bottom:1px solid #eee">
+            <span>${puntoColor(c.color, 18)}${esc(c.color)} ${c.tipo === 'falla' ? '<span class="hc-chip" style="background:#fde8e8;color:#b42318">falla</span>' : ''}</span>
+            <span>${num(c.gramos).toFixed(2)} g · ${Q(c.costo)}</span></div>`).join('')}
+        <div class="hc-ayuda mt-1">Incluye la merma presupuestada${fallaG > 0 ? ` y ${fallaG.toFixed(0)} g perdidos en fallas` : ''}.</div>`
+        : '<div class="hc-ayuda mt-3"><i class="bi bi-info-circle"></i> Todavía no se descuenta nada del inventario: sale cuando el pedido pasa a Imprimiendo.</div>';
+
+    await Swal.fire({
+        titleText: `Filamento · ${p.nombre_mascota}`,
+        width: 640,
+        html: `<div class="text-start small">
+            <h6>Por color <span class="hc-ayuda">(según la cotización)</span></h6>
+            ${chips}
+            <div class="d-flex justify-content-between pt-2"><b>Total</b><b>${totalG.toFixed(2)} g · ${hrs(totalMin)}</b></div>
+            ${merma > 0 ? `<div class="hc-ayuda">Más ${num(merma)}% de merma al imprimir: ≈ ${(totalG * (1 + merma / 100)).toFixed(0)} g reales.</div>` : ''}
+            <h6 class="mt-3">Por parte</h6>
+            <table class="table table-sm mb-0"><thead><tr><th>Parte</th><th>Color</th><th class="text-end">Gramos</th><th class="text-end">Tiempo</th></tr></thead><tbody>${filas}</tbody></table>
+            ${bloqueReal}
+        </div>`,
+        confirmButtonText: 'Cerrar',
         confirmButtonColor: ORO,
     });
 }
@@ -635,8 +772,10 @@ function alHacerClic(e) {
     if (acc === 'cobros') cobros(p);
     if (acc === 'venta') registrarVenta(p);
     if (acc === 'eliminar') eliminar(p);
+    if (acc === 'filamento') filamento(p);
 }
 $('tablero').addEventListener('click', alHacerClic);
 $('entregados').addEventListener('click', alHacerClic);
+$('cancelados').addEventListener('click', alHacerClic);
 
 cargar();

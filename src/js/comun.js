@@ -220,3 +220,13 @@ if (!window.__hcVisorComprobante) {
         abrirVisorComprobante(a.getAttribute('href'));
     });
 }
+
+// Puntito de color (igual al del inventario). Lo más específico primero.
+const PUNTOS = [['verde azulado', '#2a9d8f'], ['verde olivo', '#6b7d2c'], ['verde militar', '#4b5320'], ['rojo lava', '#c0392b'], ['ladrillo', '#a0432e'], ['marrón', '#6f4e37'], ['marron', '#6f4e37'], ['beige militar', '#ddd0b3'], ['pink', '#f48fb1'], ['yellow', '#f4c20d'], ['celeste', '#5bc0eb'], ['dorado', '#d4af37'], ['plateado', '#b8bcc2'], ['negro', '#1f1f1f'], ['blanco', '#f4f4f4'],
+    ['gris', '#8a8f98'], ['rojo', '#d62828'], ['azul', '#1d4ed8'], ['verde', '#2e9e4f'], ['amarillo', '#f4c20d'], ['naranja', '#f07b1c'], ['rosado', '#e895b0'], ['rosa', '#f48fb1'],
+    ['morado', '#7048e8'], ['café', '#7b4a2d'], ['cafe', '#7b4a2d'], ['beige', '#e1cfae'], ['transparente', '#dfe7ee']];
+export const puntoColor = (color, px = 14) => {
+    const c = String(color || '').toLowerCase();
+    const hit = PUNTOS.find(([k]) => c.includes(k));
+    return `<span style="display:inline-block;width:${px}px;height:${px}px;border-radius:50%;vertical-align:${px > 16 ? -6 : -2}px;margin-right:8px;border:1px solid #0004;background:${hit ? hit[1] : '#cfd4da'}"></span>`;
+};

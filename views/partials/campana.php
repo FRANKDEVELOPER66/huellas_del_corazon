@@ -3,9 +3,9 @@
     /* Campana de avisos: llamativa cuando hay algo pendiente */
     #pedidosBtn { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
     #pedidosBtn:hover, #pedidosBtn:focus, #pedidosBtn.show { background: rgba(255,255,255,.18); color: #fff; border-color: #fff; }
-    #campanaBtn { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
-    #campanaBtn:hover, #campanaBtn:focus, #campanaBtn.show { background: rgba(255,255,255,.18); color: #fff; border-color: #fff; }
-    #campanaBtn .bi-bell-fill { display: inline-block; transform-origin: 50% 0; }
+    .btn-aviso { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
+    .btn-aviso:hover, .btn-aviso:focus, .btn-aviso.show { background: rgba(255,255,255,.18); color: #fff; border-color: #fff; }
+    .btn-aviso .hc-icono { display: inline-block; transform-origin: 50% 0; }
 
     @keyframes hc-campana-suena {
         0%, 80%, 100% { transform: rotate(0); }
@@ -23,17 +23,18 @@
     }
 
     /* Una sola vez al entrar a la pantalla (no en bucle). Luego queda quieta; los urgentes conservan el borde dorado */
-    #campanaBtn.hc-urgente { border-color: #f6c33b; color: #f6c33b; animation: hc-campana-brilla 1.8s 3; }
-    #campanaBtn.hc-urgente .bi-bell-fill { animation: hc-campana-suena 1.5s 2; }
-    #campanaBtn.hc-urgente #campanaN { animation: hc-campana-latido 1.2s 3; }
-    #campanaBtn.hc-normal .bi-bell-fill { animation: hc-campana-suena 1.5s 1; }
+    .btn-aviso.hc-urgente { border-color: #f6c33b; color: #f6c33b; animation: hc-campana-brilla 1.8s 3; }
+    .btn-aviso.hc-urgente .hc-icono { animation: hc-campana-suena 1.5s 2; }
+    .btn-aviso.hc-urgente .hc-num { animation: hc-campana-latido 1.2s 3; }
+    .btn-aviso.hc-normal .hc-icono { animation: hc-campana-suena 1.5s 1; }
 
     /* Etiqueta de fecha de los recordatorios: destaca y brilla una sola vez al abrir la campana */
     .hc-vence { display: inline-block; margin-top: 3px; padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 800; letter-spacing: .02em; }
     .hc-vence.manana  { background: #f6c33b; color: #1c1c1c; }
     .hc-vence.hoy     { background: #fd7e14; color: #fff; }
     .hc-vence.vencido { background: #c92a4b; color: #fff; }
-    #campana .dropdown-menu.show .hc-vence { animation: hc-vence-brilla 1.4s 2; }
+    .hc-vence.pronto  { background: #e7ecff; color: #364fc7; font-weight: 700; }
+.dropdown-menu.show .hc-vence:not(.pronto) { animation: hc-vence-brilla 1.4s 2; }
     @keyframes hc-vence-brilla {
         0%   { box-shadow: 0 0 0 0 rgba(246,195,59,.9); }
         70%  { box-shadow: 0 0 0 9px rgba(246,195,59,0); }
@@ -42,7 +43,7 @@
 
     @media (prefers-reduced-motion: reduce) {
         .hc-vence { animation: none !important; }
-        #campanaBtn, #campanaBtn .bi-bell-fill, #campanaBtn #campanaN { animation: none !important; }
+        .btn-aviso, .btn-aviso .hc-icono, .btn-aviso .hc-num { animation: none !important; }
     }
 </style>
                 <!-- Pedidos en curso: cuántos hay y en qué etapa van -->
@@ -57,24 +58,37 @@
                         <a class="d-block text-center py-2 small fw-bold text-decoration-none border-top" style="background:#f4f4f1;color:#111" href="<?= $base ?>/pedidos">Ver el tablero de pedidos →</a>
                     </div>
                 </div>
-                <!-- Campana de avisos: pagos pendientes, entregas y filamento -->
-                <div class="dropdown me-lg-3 mb-lg-0 mb-2 text-lg-start text-center" id="campana">
-                    <button class="btn btn-outline-light position-relative" type="button" id="campanaBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="Avisos y recordatorios">
-                        <i class="bi bi-bell-fill fs-5"></i>
-                        <span id="campanaN" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>
+                <!-- Avisos separados: Cobros y pagos, Envíos y Recordatorios -->
+                <?php
+                $avisos = [
+                    'cobros'        => ['bi-cash-coin', 'Cobros y pagos', 'Lo que te deben y lo que tú debes pagar (pintora, insumos)'],
+                    'envios'        => ['bi-truck', 'Envíos y entregas', 'Envíos por pagar y pedidos listos para entregar'],
+                    'recordatorios' => ['bi-bell-fill', 'Recordatorios', 'Tus recordatorios de trabajo y el filamento por acabarse'],
+                ];
+                $n = 0;
+                foreach ($avisos as $clave => [$icono, $titulo, $ayuda]) : $n++; ?>
+                <div class="dropdown <?= $n === count($avisos) ? 'me-lg-3' : 'me-lg-2' ?> mb-lg-0 mb-2 text-lg-start text-center" id="aviso-<?= $clave ?>" data-grupo="<?= $clave ?>">
+                    <button class="btn btn-outline-light btn-aviso position-relative" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="<?= $titulo ?>">
+                        <i class="bi <?= $icono ?> fs-5 hc-icono"></i>
+                        <span class="hc-num position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>
                     </button>
-                    <div class="dropdown-menu dropdown-menu-end p-0 shadow" style="width:min(400px,92vw);max-height:70vh;overflow:auto" aria-labelledby="campanaBtn">
-                        <div class="px-3 py-2 fw-bold border-bottom" style="background:#f4f4f1"><i class="bi bi-bell me-2"></i>Avisos <span class="fw-normal text-muted small" id="campanaSub"></span></div>
-                        <div id="campanaLista"><div class="p-3 text-muted small">Cargando…</div></div>
+                    <div class="dropdown-menu dropdown-menu-end p-0 shadow" style="width:min(400px,92vw);max-height:70vh;overflow:auto">
+                        <div class="px-3 py-2 fw-bold border-bottom" style="background:#f4f4f1"><i class="bi <?= $icono ?> me-2"></i><?= $titulo ?> <span class="fw-normal text-muted small hc-sub"></span><div class="fw-normal text-muted small"><?= $ayuda ?></div></div>
+                        <div class="hc-lista"><div class="p-3 text-muted small">Cargando…</div></div>
                     </div>
                 </div>
+                <?php endforeach; ?>
 
     <script>
         // Campana de avisos (se actualiza sola al abrir la pantalla, al volver a la pestaña y después de guardar algo)
         (function () {
             var BASE = <?= json_encode($base ?? "") ?>;
-            var btn = document.getElementById('campanaN'), lista = document.getElementById('campanaLista'), sub = document.getElementById('campanaSub');
-            if (!btn) return;
+            var VACIO = {
+                cobros: 'No tienes cobros ni pagos pendientes.',
+                envios: 'No tienes envíos ni entregas pendientes.',
+                recordatorios: 'No tienes recordatorios pendientes.'
+            };
+            if (!document.getElementById('aviso-cobros')) return;
             var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
             var Q = function (n) { return 'Q' + Number(n).toLocaleString('es-GT', {minimumFractionDigits: 2, maximumFractionDigits: 2}); };
             var color = { alta: '#d6336c', media: '#e0a800' };
@@ -98,21 +112,23 @@
                 }).join('') : '<div class="p-4 text-center text-muted"><i class="bi bi-inbox fs-2 d-block mb-2"></i>No tienes pedidos en curso.</div>';
             }
 
-            var previos = -1;
-            function pintar(r) {
-                pintarPedidos(r.pedidos || []);
-                var l = r.datos || [];
-                btn.textContent = l.length;
-                btn.classList.toggle('d-none', !l.length);
-                btn.classList.toggle('bg-danger', r.urgentes > 0);
-                btn.classList.toggle('bg-warning', !(r.urgentes > 0));
-                var cb = document.getElementById('campanaBtn');
-                // Si llegó un aviso nuevo mientras tienes la pantalla abierta, la campana vuelve a moverse una vez
-                if (previos >= 0 && l.length > previos) { cb.classList.remove('hc-urgente', 'hc-normal'); void cb.offsetWidth; }
-                previos = l.length;
-                cb.classList.toggle('hc-urgente', r.urgentes > 0);
-                cb.classList.toggle('hc-normal', l.length > 0 && !(r.urgentes > 0));
-                btn.classList.toggle('text-dark', !(r.urgentes > 0));
+            var previos = {};
+            function pintarGrupo(clave, todos, resumen) {
+                var caja = document.getElementById('aviso-' + clave);
+                if (!caja) return;
+                var l = todos.filter(function (a) { return a.grupo === clave; });
+                var urgentes = resumen && resumen[clave] ? resumen[clave].urgentes : 0;
+                var num = caja.querySelector('.hc-num'), cb = caja.querySelector('.btn-aviso'), sub = caja.querySelector('.hc-sub'), lista = caja.querySelector('.hc-lista');
+                num.textContent = l.length;
+                num.classList.toggle('d-none', !l.length);
+                num.classList.toggle('bg-danger', urgentes > 0);
+                num.classList.toggle('bg-warning', !(urgentes > 0));
+                num.classList.toggle('text-dark', !(urgentes > 0));
+                // Si llegó un aviso nuevo con la pantalla abierta, el botón vuelve a moverse una vez
+                if (previos[clave] !== undefined && l.length > previos[clave]) { cb.classList.remove('hc-urgente', 'hc-normal'); void cb.offsetWidth; }
+                previos[clave] = l.length;
+                cb.classList.toggle('hc-urgente', urgentes > 0);
+                cb.classList.toggle('hc-normal', l.length > 0 && !(urgentes > 0));
                 sub.textContent = l.length ? '· ' + l.length + (l.length === 1 ? ' pendiente' : ' pendientes') : '';
                 lista.innerHTML = l.length ? l.map(function (a) {
                     return '<a class="d-flex gap-2 text-decoration-none text-dark px-3 py-2 border-bottom align-items-start" style="border-left:5px solid ' + color[a.nivel] + '" href="' + BASE + a.url + '">'
@@ -120,7 +136,13 @@
                         + '<span class="flex-grow-1"><b class="d-block">' + esc(a.titulo) + '</b><span class="small text-muted">' + esc(a.detalle) + '</span>'
                         + (a.etiqueta ? '<span class="d-block"><span class="hc-vence ' + esc(a.etiqueta.clase) + '"><i class="bi bi-alarm me-1"></i>' + esc(a.etiqueta.texto) + '</span></span>' : '') + '</span>'
                         + (a.monto ? '<b class="text-nowrap">' + Q(a.monto) + '</b>' : '') + '</a>';
-                }).join('') : '<div class="p-4 text-center text-muted"><i class="bi bi-check-circle fs-2 d-block mb-2" style="color:#2f9e44"></i>Todo al día. No tienes nada pendiente.</div>';
+                }).join('') : '<div class="p-4 text-center text-muted"><i class="bi bi-check-circle fs-2 d-block mb-2" style="color:#2f9e44"></i>' + VACIO[clave] + '</div>';
+            }
+
+            function pintar(r) {
+                pintarPedidos(r.pedidos || []);
+                var todos = r.datos || [];
+                ['cobros', 'envios', 'recordatorios'].forEach(function (g) { pintarGrupo(g, todos, r.grupos); });
             }
 
             var cargando = false;

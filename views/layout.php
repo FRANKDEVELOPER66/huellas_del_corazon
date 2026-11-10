@@ -37,15 +37,12 @@ $activo = fn(string $ruta): string => $rutaActual === $ruta ? 'active' : '';
                 <span class="navbar-toggler-icon"></span>
             </button>
             <a class="navbar-brand" href="<?= $base ?>/">
-                <img src="<?= asset('./images/HUELLA_SIN.png') ?>" width="50px" alt="Huellas del Corazón">
-                Aplicaciones
+                <img src="<?= asset('./images/HUELLA_SIN.png') ?>" width="50px" alt="Huellas del Corazón"> Inicio
+                
             </a>
             <div class="collapse navbar-collapse" id="navbarToggler">
 
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0" style="margin: 0;">
-                    <li class="nav-item">
-                        <a class="nav-link <?= $activo('/') ?>" aria-current="page" href="<?= $base ?>/"><i class="bi bi-house-fill me-2"></i>Inicio</a>
-                    </li>
                     <li class="nav-item">
                         <a class="nav-link <?= $activo('/recordatorios') ?>" href="<?= $base ?>/recordatorios"><i class="bi bi-journal-check me-2"></i>Recordatorios</a>
                     </li>

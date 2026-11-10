@@ -5,6 +5,7 @@ namespace Controllers;
 use MVC\Router;
 use Model\ActiveRecord;
 use Model\Cancelacion;
+use Model\Configuracion;
 use Model\Inventario;
 use Model\Pago;
 use Model\Pedido;
@@ -266,6 +267,57 @@ class PedidosController
             self::responder(0, 'Pedido no encontrado');
         }
         self::responder(1, '', ['datos' => Inventario::carretesParaFalla((int)$pedido->id)]);
+    }
+
+    // Filamento de un pedido: lo que dice su cotización (por parte y por color) y lo que ya salió del inventario.
+    // GET: id (pedido)
+    public static function filamentoAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        $pedido = Pedido::find((int)($_GET['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        $v = ActiveRecord::fetchArray('SELECT cotizacion_id FROM ventas WHERE pedido_id = ?', [(int)$pedido->id]);
+        $cotId = (int)($v[0]['cotizacion_id'] ?? 0) ?: (int)($pedido->cotizacion_id ?? 0);
+
+        $partes = [];
+        $merma = 0.0;
+        if ($cotId) {
+            $partes = ActiveRecord::fetchArray(
+                'SELECT cp.*, m.nombre AS material
+                 FROM cotizacion_partes cp JOIN materiales m ON m.id = cp.material_id
+                 WHERE cp.cotizacion_id = ? ORDER BY cp.id',
+                [$cotId]
+            );
+            $c = ActiveRecord::fetchArray('SELECT c.configuracion_id FROM cotizaciones c WHERE c.id = ?', [$cotId]);
+            if ($c) {
+                $cfg = Configuracion::find((int)$c[0]['configuracion_id']);
+                $merma = (float)($cfg->merma_pct ?? 0);
+            }
+        }
+
+        $consumos = [];
+        if (Inventario::hayConsumos()) {
+            $consumos = ActiveRecord::fetchArray(
+                "SELECT k.color, m.nombre AS material, cc.tipo, SUM(cc.gramos) AS gramos, SUM(cc.costo) AS costo
+                 FROM carrete_consumos cc
+                 JOIN carretes k ON k.id = cc.carrete_id
+                 JOIN materiales m ON m.id = k.material_id
+                 WHERE cc.pedido_id = ?
+                 GROUP BY k.color, m.nombre, cc.tipo
+                 ORDER BY k.color",
+                [(int)$pedido->id]
+            );
+        }
+
+        self::responder(1, '', ['datos' => [
+            'sin_cotizacion' => !$cotId,
+            'merma_pct'      => $merma,
+            'partes'         => $partes,
+            'consumos'       => $consumos,
+        ]]);
     }
 
     // Registra una impresión fallida: saca los gramos perdidos del carrete y suma su costo a esa pieza.
