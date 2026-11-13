@@ -70,6 +70,13 @@ $router->post('/API/pedidos/finalizar', [PedidosController::class, 'finalizarAPI
 $router->get('/API/pedidos/cancelacion', [PedidosController::class, 'cancelacionAPI']);
 $router->post('/API/pedidos/cancelar',   [PedidosController::class, 'cancelarAPI']);
 $router->get('/API/pedidos/filamento',    [PedidosController::class, 'filamentoAPI']);
+$router->post('/API/pedidos/filamento-guardar',     [PedidosController::class, 'filamentoGuardarAPI']);
+$router->post('/API/pedidos/filamento-restablecer', [PedidosController::class, 'filamentoRestablecerAPI']);
+$router->get('/API/pedidos/cola',               [PedidosController::class, 'colaAPI']);
+$router->post('/API/pedidos/cola-config',       [PedidosController::class, 'colaConfigAPI']);
+$router->post('/API/pedidos/inicio-impresion',  [PedidosController::class, 'inicioImpresionAPI']);
+
+
 
 
 

@@ -97,6 +97,8 @@ async function detalle(id) {
                     <tr><td>Costo estimado (cotización)</td><td class="text-end">${v.costo_estimado === null ? '—' : Q(v.costo_estimado)}</td></tr>
                     <tr><td>Ganancia estimada</td><td class="text-end">${v.ganancia_estimada === null ? '—' : Q(v.ganancia_estimada)}</td></tr>
                     ${num(v.costo_fallas) > 0 ? `<tr><td class="neg">Filamento perdido en fallas <span class="hc-ayuda">(ya restado de la ganancia real)</span></td><td class="text-end neg">−${Q(v.costo_fallas)}</td></tr>` : ''}
+                    ${num(v.costo_cambio) > 0.004 ? `<tr><td class="neg">Cambio de colores, más caro que lo cotizado <span class="hc-ayuda">(ya restado de la ganancia real)</span></td><td class="text-end neg">−${Q(v.costo_cambio)}</td></tr>` : ''}
+                    ${num(v.costo_cambio) < -0.004 ? `<tr><td class="pos">Cambio de colores, más barato que lo cotizado <span class="hc-ayuda">(ya sumado a la ganancia real)</span></td><td class="text-end pos">+${Q(-num(v.costo_cambio))}</td></tr>` : ''}
                     <tr><td><b>Ganancia real</b>${num(v.gastos_pendientes) === 1 ? ' <span class="hc-chip">est.</span>' : ''}</td><td class="text-end fw-bold ${signo(v.ganancia_real)}">${Q(v.ganancia_real)} (${v.margen_real_pct === null ? '—' : `${num(v.margen_real_pct)}%`})</td></tr>
                 </tbody></table>
                 ${num(v.gastos_pendientes) === 1 ? '<div class="hc-ayuda mb-2">Esta ganancia aún es estimada: falta pagar la pintora, el envío u otros. Regístralo en Gastos > Pagos pendientes y se vuelve real.</div>' : ''}

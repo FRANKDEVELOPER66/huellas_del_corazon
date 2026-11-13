@@ -312,12 +312,171 @@ class PedidosController
             );
         }
 
+        $totalG = round(array_sum(array_map(fn($x) => (float)$x['gramos'], $partes)), 2);
+        $costoCot = 0.0;
+        if ($cotId) {
+            $costoCot = (float)(ActiveRecord::fetchArray('SELECT costo_material FROM cotizaciones WHERE id = ?', [$cotId])[0]['costo_material'] ?? 0);
+        }
+        $plan = Inventario::planReal((int)$pedido->id);
+        $cambio = null;
+        if ($plan) {
+            $c = ActiveRecord::fetchArray('SELECT costo_cotizado, costo_nuevo, sobrecosto FROM pedido_filamento_cambio WHERE pedido_id = ?', [(int)$pedido->id]);
+            $cambio = $c ? [
+                'costo_cotizado' => (float)$c[0]['costo_cotizado'],
+                'costo_nuevo'    => (float)$c[0]['costo_nuevo'],
+                'sobrecosto'     => (float)$c[0]['sobrecosto'],
+            ] : null;
+        }
+
+        // Colores que se pueden elegir (los que tienen carrete registrado) con lo que cuestan al cotizar
+        $colores = [];
+        $editable = Inventario::hayPlanReal() && $cotId && $pedido->estado === 'solicitado' && count($partes) > 0;
+        if ($editable) {
+            $matCosto = [];
+            foreach (ActiveRecord::fetchArray('SELECT id, costo_kg FROM materiales') as $m) {
+                $matCosto[(int)$m['id']] = (float)$m['costo_kg'];
+            }
+            foreach (Inventario::colores() as $c) {
+                $colores[] = [
+                    'material_id' => (int)$c['material_id'],
+                    'material'    => $c['material'],
+                    'color'       => $c['color'],
+                    'gramos'      => (float)$c['gramos'],
+                    'cotiza_a'    => round(Inventario::costoKg((int)$c['material_id'], $c['color'], $matCosto[(int)$c['material_id']] ?? 0), 2),
+                ];
+            }
+        }
+
         self::responder(1, '', ['datos' => [
             'sin_cotizacion' => !$cotId,
             'merma_pct'      => $merma,
             'partes'         => $partes,
             'consumos'       => $consumos,
+            'plan'           => $plan,
+            'cambio'         => $cambio,
+            'total_g'        => $totalG,
+            'costo_cotizado' => round($costoCot, 2),
+            'editable'       => $editable,
+            'colores'        => $colores,
         ]]);
+    }
+
+    // Guarda los colores reales de un pedido que todavía no se imprime.
+    // POST: id, items (JSON [{material_id, color, gramos}]). La suma debe dar los gramos de la cotización (±0.1 g).
+    public static function filamentoGuardarAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        if (!Inventario::hayPlanReal()) {
+            self::responder(0, 'Falta crear las tablas: ejecuta sql/pedido_filamento.sql');
+        }
+        $pedido = Pedido::find((int)($_POST['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        if ($pedido->estado !== 'solicitado') {
+            self::responder(0, 'Los colores solo se cambian antes de empezar a imprimir');
+        }
+        $v = ActiveRecord::fetchArray(
+            'SELECT v.cotizacion_id, q.costo_material, COALESCE(cfg.merma_pct, 0) AS merma_pct
+             FROM ventas v JOIN cotizaciones q ON q.id = v.cotizacion_id
+             JOIN configuraciones cfg ON cfg.id = q.configuracion_id WHERE v.pedido_id = ?',
+            [(int)$pedido->id]
+        );
+        if (!$v) {
+            self::responder(0, 'Este pedido no tiene venta con cotización');
+        }
+        $totalCot = round((float)ActiveRecord::fetchArray('SELECT COALESCE(SUM(gramos), 0) AS g FROM cotizacion_partes WHERE cotizacion_id = ?', [(int)$v[0]['cotizacion_id']])[0]['g'], 2);
+
+        $items = json_decode((string)($_POST['items'] ?? '[]'), true);
+        if (!is_array($items) || !$items) {
+            self::responder(0, 'Agrega al menos un color');
+        }
+
+        $disponibles = [];
+        foreach (Inventario::colores() as $c) {
+            $disponibles[$c['material_id'] . '|' . mb_strtolower($c['color'])] = $c;
+        }
+        $matCosto = [];
+        foreach (ActiveRecord::fetchArray('SELECT id, costo_kg FROM materiales') as $m) {
+            $matCosto[(int)$m['id']] = (float)$m['costo_kg'];
+        }
+
+        // Une las filas repetidas del mismo color
+        $juntos = [];
+        $suma = 0.0;
+        foreach ($items as $i) {
+            $mid = (int)($i['material_id'] ?? 0);
+            $color = trim((string)($i['color'] ?? ''));
+            $g = round((float)($i['gramos'] ?? 0), 2);
+            if ($g <= 0) {
+                self::responder(0, 'Cada color debe llevar más de 0 gramos');
+            }
+            $clave = $mid . '|' . mb_strtolower($color);
+            if (!isset($disponibles[$clave])) {
+                self::responder(0, 'Ese color no está en tu inventario: ' . $color);
+            }
+            $juntos[$clave] ??= ['material_id' => $mid, 'color' => $disponibles[$clave]['color'], 'gramos' => 0.0];
+            $juntos[$clave]['gramos'] = round($juntos[$clave]['gramos'] + $g, 2);
+            $suma += $g;
+        }
+        if (abs($suma - $totalCot) > 0.1 + 1e-9) {
+            self::responder(0, 'Los gramos deben sumar ' . number_format($totalCot, 1) . ' g, como la cotización. Ahora suman ' . number_format($suma, 1) . ' g');
+        }
+
+        $costoNuevo = 0.0;
+        foreach ($juntos as $j) {
+            $costoNuevo += $j['gramos'] / 1000 * Inventario::costoKg($j['material_id'], $j['color'], $matCosto[$j['material_id']] ?? 0);
+        }
+        $costoNuevo = round($costoNuevo * (1 + (float)$v[0]['merma_pct'] / 100), 2);
+        $costoCot = round((float)$v[0]['costo_material'], 2);
+        // Positivo = cuesta más (baja la ganancia); negativo = ahorro (la sube)
+        $sobre = round($costoNuevo - $costoCot, 2);
+
+        $db = ActiveRecord::getDB();
+        $db->beginTransaction();
+        try {
+            $db->prepare('DELETE FROM pedido_filamento WHERE pedido_id = ?')->execute([(int)$pedido->id]);
+            $ins = $db->prepare('INSERT INTO pedido_filamento (pedido_id, material_id, color, gramos) VALUES (?, ?, ?, ?)');
+            foreach ($juntos as $j) {
+                $ins->execute([(int)$pedido->id, $j['material_id'], $j['color'], $j['gramos']]);
+            }
+            $db->prepare('REPLACE INTO pedido_filamento_cambio (pedido_id, costo_cotizado, costo_nuevo, sobrecosto) VALUES (?, ?, ?, ?)')
+                ->execute([(int)$pedido->id, $costoCot, $costoNuevo, $sobre]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            self::responder(0, 'No se pudieron guardar los colores');
+        }
+
+        self::responder(1, $sobre > 0.004
+            ? 'Colores guardados. El cambio cuesta Q' . number_format($sobre, 2) . ' más y se resta de la ganancia de esta venta'
+            : ($sobre < -0.004
+                ? 'Colores guardados. El cambio ahorra Q' . number_format(-$sobre, 2) . ' y se suma a la ganancia de esta venta'
+                : 'Colores guardados'), ['costo_cotizado' => $costoCot, 'costo_nuevo' => $costoNuevo, 'sobrecosto' => $sobre]);
+    }
+
+    // Vuelve a los colores de la cotización (borra el cambio). POST: id. Solo antes de imprimir.
+    public static function filamentoRestablecerAPI(Router $router): void
+    {
+        getHeadersApi();
+
+        if (!Inventario::hayPlanReal()) {
+            self::responder(0, 'Falta crear las tablas: ejecuta sql/pedido_filamento.sql');
+        }
+        $pedido = Pedido::find((int)($_POST['id'] ?? 0));
+        if (!$pedido) {
+            self::responder(0, 'Pedido no encontrado');
+        }
+        if ($pedido->estado !== 'solicitado') {
+            self::responder(0, 'Los colores solo se cambian antes de empezar a imprimir');
+        }
+        $db = ActiveRecord::getDB();
+        $db->prepare('DELETE FROM pedido_filamento WHERE pedido_id = ?')->execute([(int)$pedido->id]);
+        $db->prepare('DELETE FROM pedido_filamento_cambio WHERE pedido_id = ?')->execute([(int)$pedido->id]);
+        self::responder(1, 'Vuelven los colores de la cotización');
     }
 
     // Registra una impresión fallida: saca los gramos perdidos del carrete y suma su costo a esa pieza.
@@ -351,6 +510,11 @@ class PedidosController
             self::responder(0, 'Elige de qué carrete salió el filamento');
         }
         $k = $filas[0];
+        // Solo se pierde filamento de los colores que lleva esta impresión
+        $permitidos = array_map(fn($x) => (int)$x['id'], Inventario::carretesParaFalla((int)$pedido->id));
+        if (!in_array((int)$k['id'], $permitidos, true)) {
+            self::responder(0, 'Ese carrete no es de un color que use esta impresión. Elige uno de los colores de la pieza');
+        }
         if ($gramos > (float)$k['gramos_actuales'] + 0.005) {
             self::responder(0, 'Ese carrete solo tiene ' . number_format((float)$k['gramos_actuales'], 0) . ' g. Si el peso está mal, corrígelo en el inventario; si la falla usó dos carretes, regístrala en dos partes');
         }

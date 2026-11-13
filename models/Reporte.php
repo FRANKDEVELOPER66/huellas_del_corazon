@@ -42,9 +42,14 @@ class Reporte
     // Usa el alias fa (y v, de ventas). Si todavía no existe la tabla de consumos, no suma nada.
     private static function joinFallas(): string
     {
-        return Inventario::hayConsumos()
-            ? "LEFT JOIN (SELECT pedido_id, SUM(costo) AS falla FROM carrete_consumos WHERE tipo = 'falla' GROUP BY pedido_id) fa ON fa.pedido_id = v.pedido_id"
-            : "LEFT JOIN (SELECT 0 AS pedido_id, 0 AS falla FROM DUAL WHERE 1 = 0) fa ON fa.pedido_id = v.pedido_id";
+        // cambio = lo que costó de más (o de menos, si es negativo) cambiar los colores de la cotización antes de imprimir (Pedidos > filamento)
+        $falla = Inventario::hayConsumos()
+            ? "SELECT pedido_id, SUM(costo) AS falla, 0 AS cambio FROM carrete_consumos WHERE tipo = 'falla' GROUP BY pedido_id"
+            : "SELECT 0 AS pedido_id, 0 AS falla, 0 AS cambio FROM DUAL WHERE 1 = 0";
+        $cambio = Inventario::hayPlanReal()
+            ? " UNION ALL SELECT pedido_id, 0, sobrecosto FROM pedido_filamento_cambio WHERE sobrecosto <> 0"
+            : '';
+        return "LEFT JOIN (SELECT pedido_id, SUM(falla) AS falla, SUM(cambio) AS cambio FROM ($falla$cambio) u GROUP BY pedido_id) fa ON fa.pedido_id = v.pedido_id";
     }
 
     // Una venta con su cuadro: estimado (cotización) contra real. Se arma aquí, no en una vista de MySQL.
@@ -62,9 +67,10 @@ class Reporte
                          (" . self::PENDIENTE_DIRECTO . " > 0.005) AS gastos_pendientes,
                          v.ingreso_neto - q.costo_total AS ganancia_estimada,
                          COALESCE(fa.falla, 0) AS costo_fallas,
+                         COALESCE(fa.cambio, 0) AS costo_cambio,
                          CASE WHEN p.estado = 'cancelado'
                               THEN COALESCE(cn.retenido, 0) - COALESCE(cn.costo_material, 0) - (COALESCE(gp.pintura, 0) + COALESCE(gp.envio, 0) + COALESCE(gp.otros, 0))
-                              ELSE v.ingreso_neto - (COALESCE(q.costo_material + q.costo_luz + q.costo_desgaste + q.costo_empaque, 0) + COALESCE(fa.falla, 0) + " . self::COSTO_DIRECTO . ") END AS ganancia_real
+                              ELSE v.ingreso_neto - (COALESCE(q.costo_material + q.costo_luz + q.costo_desgaste + q.costo_empaque, 0) + COALESCE(fa.falla, 0) + COALESCE(fa.cambio, 0) + " . self::COSTO_DIRECTO . ") END AS ganancia_real
                   FROM ventas v
                   JOIN clientes c ON c.id = v.cliente_id
                   LEFT JOIN pedidos p ON p.id = v.pedido_id
@@ -133,7 +139,7 @@ class Reporte
         return ActiveRecord::fetchArray(
             "SELECT v.id, v.descripcion,
                     CASE WHEN $canc THEN COALESCE(cn.retenido, 0) ELSE v.ingreso_neto END AS ingreso_neto,
-                    CASE WHEN $canc THEN COALESCE(cn.costo_material, 0) ELSE COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) END AS c_material,
+                    CASE WHEN $canc THEN COALESCE(cn.costo_material, 0) ELSE COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) + COALESCE(fa.cambio, 0) END AS c_material,
                     CASE WHEN $canc THEN 0 ELSE COALESCE(q.costo_luz + q.costo_desgaste, 0) END AS c_maquina,
                     CASE WHEN $canc THEN 0 ELSE COALESCE(q.costo_empaque, 0) END AS c_empaque,
                     CASE WHEN $canc THEN COALESCE(gp.pintura, 0) + COALESCE(gp.envio, 0) + COALESCE(gp.otros, 0) ELSE " . self::COSTO_DIRECTO . " END AS c_directos,
@@ -343,7 +349,7 @@ class Reporte
         ));
 
         $usado = $num(ActiveRecord::fetchArray(
-            "SELECT COALESCE(SUM(CASE WHEN $cancelEf THEN COALESCE(cn.costo_material, 0) ELSE q.costo_material + COALESCE(fa.falla, 0) END), 0) AS total
+            "SELECT COALESCE(SUM(CASE WHEN $cancelEf THEN COALESCE(cn.costo_material, 0) ELSE q.costo_material + COALESCE(fa.falla, 0) + COALESCE(fa.cambio, 0) END), 0) AS total
              FROM ventas v JOIN cotizaciones q ON q.id = v.cotizacion_id
              LEFT JOIN pedidos p ON p.id = v.pedido_id
              " . Cancelacion::join() . "
@@ -353,7 +359,7 @@ class Reporte
         ));
 
         $enProceso = $num(ActiveRecord::fetchArray(
-            "SELECT COALESCE(SUM(COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) + COALESCE(gd.total, 0)), 0) AS total
+            "SELECT COALESCE(SUM(COALESCE(q.costo_material, 0) + COALESCE(fa.falla, 0) + COALESCE(fa.cambio, 0) + COALESCE(gd.total, 0)), 0) AS total
              FROM ventas v
              LEFT JOIN pedidos p ON p.id = v.pedido_id
              " . Cancelacion::join() . "

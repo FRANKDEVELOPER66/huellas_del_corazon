@@ -71,13 +71,25 @@ class Inventario
     // Salidas por material: kg que ya se usan o se usaron en piezas en producción o entregadas
     private static function sqlSalidas(): string
     {
+        $conPlan = self::hayPlanReal();
+        // Partes de la cotización (o, si el pedido cambió de colores, los colores reales que eligió)
+        $partes = $conPlan
+            ? "(SELECT q.id AS cot_id, v2.pedido_id, cp.material_id, cp.gramos FROM ventas v2
+                   JOIN cotizaciones q ON q.id = v2.cotizacion_id
+                   JOIN cotizacion_partes cp ON cp.cotizacion_id = q.id
+                   WHERE NOT EXISTS (SELECT 1 FROM pedido_filamento pf WHERE pf.pedido_id = v2.pedido_id)
+                 UNION ALL
+                 SELECT NULL, pf.pedido_id, pf.material_id, pf.gramos FROM pedido_filamento pf)"
+            : "(SELECT q.id AS cot_id, v2.pedido_id, cp.material_id, cp.gramos FROM ventas v2
+                   JOIN cotizaciones q ON q.id = v2.cotizacion_id
+                   JOIN cotizacion_partes cp ON cp.cotizacion_id = q.id)";
         return "SELECT cp.material_id, SUM(cp.gramos * (1 + COALESCE(cfg.merma_pct, 0) / 100)) / 1000 AS kg
                 FROM ventas v
                 JOIN pedidos p ON p.id = v.pedido_id
                 " . Cancelacion::join() . "
                 JOIN cotizaciones q ON q.id = v.cotizacion_id
                 JOIN configuraciones cfg ON cfg.id = q.configuracion_id
-                JOIN cotizacion_partes cp ON cp.cotizacion_id = q.id
+                JOIN $partes cp ON cp.pedido_id = v.pedido_id
                 WHERE p.estado <> 'solicitado' AND (p.estado <> 'cancelado' OR cn.etapa <> 'solicitado')
                 GROUP BY cp.material_id";
     }
@@ -224,9 +236,57 @@ class Inventario
         return $k ? round((float) $k[0]['costo_kg'], 2) : $costoMaterial;
     }
 
+    // ¿Existen las tablas del cambio de colores?
+    public static function hayPlanReal(): bool
+    {
+        static $hay = null;
+        if ($hay === null) {
+            $hay = count(ActiveRecord::fetchArray("SHOW TABLES LIKE 'pedido_filamento'")) > 0
+                && count(ActiveRecord::fetchArray("SHOW TABLES LIKE 'pedido_filamento_cambio'")) > 0;
+        }
+        return $hay;
+    }
+
+    // Colores reales que el usuario eligió para un pedido (gramos netos). Vacío = se usa lo de la cotización.
+    public static function planReal(int $pedidoId): array
+    {
+        if (!self::hayPlanReal()) {
+            return [];
+        }
+        $filas = ActiveRecord::fetchArray(
+            'SELECT f.material_id, m.nombre AS material, f.color, f.gramos
+             FROM pedido_filamento f JOIN materiales m ON m.id = f.material_id
+             WHERE f.pedido_id = ? ORDER BY f.id',
+            [$pedidoId]
+        );
+        foreach ($filas as &$f) {
+            $f['material_id'] = (int) $f['material_id'];
+            $f['gramos'] = round((float) $f['gramos'], 2);
+        }
+        return $filas;
+    }
+
     // Lo que necesita imprimir un pedido, parte por parte (con la merma): material, color, gramos y la merma que va dentro
     private static function necesidades(int $pedidoId): array
     {
+        $plan = self::planReal($pedidoId);
+        if ($plan) {
+            $m = ActiveRecord::fetchArray(
+                'SELECT COALESCE(cfg.merma_pct, 0) AS merma_pct FROM ventas v
+                 JOIN cotizaciones q ON q.id = v.cotizacion_id
+                 JOIN configuraciones cfg ON cfg.id = q.configuracion_id WHERE v.pedido_id = ?',
+                [$pedidoId]
+            );
+            $pct = (float) ($m[0]['merma_pct'] ?? 0);
+            return array_map(fn($f) => [
+                'parte_id'    => null,
+                'material_id' => $f['material_id'],
+                'material'    => $f['material'],
+                'color'       => $f['color'],
+                'gramos'      => (float) $f['gramos'] * (1 + $pct / 100),
+                'merma'       => (float) $f['gramos'] * $pct / 100,
+            ], $plan);
+        }
         $color = self::hayColor() ? 'cp.color' : 'NULL';
         return ActiveRecord::fetchArray(
             "SELECT cp.id AS parte_id, cp.material_id, m.nombre AS material, $color AS color,
@@ -487,9 +547,13 @@ class Inventario
                 continue;
             }
             $k['sugerido'] = isset($piden[$k['material_id'] . '|' . mb_strtolower($k['color'])]) || isset($piden[$k['material_id'] . '|']);
+            // Solo los carretes de los colores que lleva esta impresión: no tiene sentido descontar otro
+            if (!$k['sugerido']) {
+                continue;
+            }
             $lista[] = $k;
         }
-        usort($lista, fn($a, $b) => [!$a['sugerido'], $a['gramos_actuales']] <=> [!$b['sugerido'], $b['gramos_actuales']]);
+        usort($lista, fn($a, $b) => $a['gramos_actuales'] <=> $b['gramos_actuales']);
         return $lista;
     }
 

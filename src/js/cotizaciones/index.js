@@ -1,4 +1,5 @@
 import Swal from 'sweetalert2';
+import { selectorColor } from '../selectorColor.js';
 
 const raiz = document.getElementById('appCotizar');
 const BASE = raiz.dataset.base || '';
@@ -121,15 +122,14 @@ function agregarParte() {
     fila.dataset.parte = '1';
     fila.innerHTML = `
         <input type="text" class="form-control p-nombre" placeholder="Parte ${n}">
-        <select class="form-select p-material">${opciones(materiales)}</select>
-        <select class="form-select p-color"></select>
+        <div class="p-sel"><input type="hidden" class="p-material"><input type="hidden" class="p-color"></div>
         <input type="number" class="form-control p-gramos" min="0" step="any" placeholder="Gramos">
         <input type="number" class="form-control p-horas" min="0" step="1" placeholder="Hrs">
         <input type="number" class="form-control p-minutos" min="0" step="any" placeholder="Min">
         <button type="button" class="btn btn-outline-danger p-quitar" title="Quitar"><i class="bi bi-x-lg"></i></button>
         <div class="hc-ayuda p-aviso" style="grid-column: 1 / -1"></div>`;
     $('partes').appendChild(fila);
-    llenarColores(fila);
+    montarSelector(fila);
 }
 
 // Colores que tienes de ese material, con lo que queda y lo que cuesta por kg
@@ -137,13 +137,45 @@ const gr = (n) => Number(n || 0).toLocaleString('es-GT', { maximumFractionDigits
 // Con qué costo por kg se cotiza: el mayor entre la referencia del material (Materiales) y lo que costó el carrete real
 const refMaterial = (matId) => Number((materiales.find((m) => String(m.id) === String(matId)) || {}).costo_kg || 0);
 const cotizaA = (matId, c) => Math.max(refMaterial(matId), Number(c.costo_kg || 0));
-function llenarColores(fila, elegido = '') {
-    const mat = fila.querySelector('.p-material').value;
-    const lista = colores.filter((c) => String(c.material_id) === String(mat));
-    const sel = fila.querySelector('.p-color');
-    sel.innerHTML = lista.length
-        ? `<option value="">Elige color…</option>` + lista.map((c) => `<option value="${esc(c.color)}" ${c.color === elegido ? 'selected' : ''}>${esc(c.color)} · ${gr(c.gramos)} · cotiza a ${Q0(cotizaA(mat, c))}/kg</option>`).join('')
-        : `<option value="">Sin carretes de este material: regístralos en Gastos &gt; Inventario</option>`;
+const nombreMaterial = (matId) => (materiales.find((m) => String(m.id) === String(matId)) || {}).nombre || '';
+const itemsColores = () => colores.map((c) => ({
+    material_id: c.material_id,
+    material: c.material || nombreMaterial(c.material_id),
+    color: c.color,
+    gramos: c.gramos,
+    cotiza_a: cotizaA(c.material_id, c),
+}));
+
+// Un solo selector de color + material con búsqueda (src/js/selectorColor.js). Los dos campos ocultos
+// (.p-material y .p-color) siguen guardando lo elegido para el resto del formulario.
+function montarSelector(fila) {
+    const mat = fila.querySelector('.p-material');
+    const col = fila.querySelector('.p-color');
+    const sc = selectorColor({
+        items: itemsColores(),
+        anterior: () => {
+            const filas = [...document.querySelectorAll('.parte-fila[data-parte]')];
+            for (let i = filas.indexOf(fila) - 1; i >= 0; i--) {
+                const c = filas[i].querySelector('.p-color').value;
+                if (c) return { material_id: filas[i].querySelector('.p-material').value, color: c };
+            }
+            return null;
+        },
+        alCambiar: (s) => {
+            mat.value = s ? s.material_id : '';
+            col.value = s ? s.color : '';
+            col.dispatchEvent(new Event('input', { bubbles: true }));
+        },
+    });
+    fila._sc = sc;
+    fila.querySelector('.p-sel').appendChild(sc.el);
+    avisoColor(fila);
+}
+
+function fijarColor(fila, materialId, color) {
+    const ok = fila._sc.set(materialId, color);
+    fila.querySelector('.p-material').value = ok ? String(materialId) : '';
+    fila.querySelector('.p-color').value = ok ? fila._sc.get().color : '';
     avisoColor(fila);
 }
 
@@ -157,7 +189,9 @@ function avisoColor(fila) {
         aviso.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> De ${esc(c.color)} solo quedan ${gr(c.gramos)} y esta parte pide ${gr(gramos)} (sin contar la merma). Tendrás que comprar más antes de imprimir.</span>`;
     } else if (c) {
         const mat = fila.querySelector('.p-material').value;
-        aviso.innerHTML = `<i class="bi bi-disc"></i> ${esc(c.color)}: te costó ${Q(c.costo_kg)}/kg · se cotiza a <b>${Q(cotizaA(mat, c))}/kg</b> (${cotizaA(mat, c) > Number(c.costo_kg) ? 'referencia del material' : 'costo real'}) · quedan ${gr(c.gramos)}`;
+        const otros = fila._sc ? fila._sc.tambienEn(c.color, mat) : [];
+        aviso.innerHTML = `<i class="bi bi-disc"></i> ${esc(c.color)}: te costó ${Q(c.costo_kg)}/kg · se cotiza a <b>${Q(cotizaA(mat, c))}/kg</b> (${cotizaA(mat, c) > Number(c.costo_kg) ? 'referencia del material' : 'costo real'}) · quedan ${gr(c.gramos)}`
+            + (otros.length ? ` <span class="text-primary">· <i class="bi bi-info-circle"></i> También en ${otros.map(esc).join(', ')}</span>` : '');
     } else {
         aviso.innerHTML = '';
     }
@@ -383,8 +417,7 @@ async function editar(id, copia = false) {
         agregarParte();
         const fila = [...document.querySelectorAll('.parte-fila[data-parte]')].pop();
         fila.querySelector('.p-nombre').value = p.nombre || '';
-        fila.querySelector('.p-material').value = p.material_id;
-        llenarColores(fila, p.color || '');
+        fijarColor(fila, p.material_id, p.color || '');
         fila.querySelector('.p-gramos').value = Number(p.gramos);
         fila.querySelector('.p-horas').value = Math.floor(Number(p.minutos) / 60);
         fila.querySelector('.p-minutos').value = Number(p.minutos) % 60;
@@ -409,13 +442,11 @@ async function guardar() {
     const filas = [...document.querySelectorAll('.parte-fila[data-parte]')].filter((f) => (parseFloat(f.querySelector('.p-gramos').value) || 0) > 0);
     for (const f of filas) {
         const nombre = f.querySelector('.p-nombre').value.trim() || 'cada parte';
-        const mat = f.querySelector('.p-material');
-        const hayColores = colores.some((c) => String(c.material_id) === String(mat.value));
-        if (!hayColores) {
+        if (!colores.length) {
             return Swal.fire({
                 icon: 'warning',
-                title: 'No tienes carretes de este material',
-                html: `Para cotizar “${esc(nombre)}” (${esc(mat.selectedOptions[0]?.text || 'material')}) primero registra el carrete en <b>Gastos &gt; Inventario de filamento</b>.`,
+                title: 'No tienes carretes registrados',
+                html: `Para cotizar “${esc(nombre)}” primero registra el carrete en <b>Gastos &gt; Inventario de filamento</b>.`,
                 confirmButtonText: 'OK, entendido',
                 confirmButtonColor: ORO,
             });
@@ -725,7 +756,6 @@ async function abrirVenta(id) {
 // ── Eventos ─────────────────────────────────────────────────────────────────
 raiz.addEventListener('input', (e) => {
     const fila = e.target.closest('.parte-fila[data-parte]');
-    if (fila && e.target.classList.contains('p-material')) llenarColores(fila);
     if (fila && (e.target.classList.contains('p-color') || e.target.classList.contains('p-gramos'))) avisoColor(fila);
     if (e.target.name === 'empaque') actualizarEmpaqueOtro();
     actualizarEnvioTotal();

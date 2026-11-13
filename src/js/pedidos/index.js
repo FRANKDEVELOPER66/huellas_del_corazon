@@ -1,4 +1,5 @@
 import Swal from 'sweetalert2';
+import { selectorColor } from '../selectorColor.js';
 import { $, ORO, esc, num, Q, toast, crearApi, confirmar, error, opciones, hoy, fecha, cobrarVenta, editarPago, puntoColor } from '../comun.js';
 
 const BASE = $('appPedidos').dataset.base || '';
@@ -199,7 +200,7 @@ async function vistaPreviaFilamento(p) {
     const merma = num(r.datos.merma_pct);
     const stock = inv.codigo === 1 ? inv.datos || [] : [];
     const porColor = {};
-    r.datos.partes.forEach((x) => {
+    (r.datos.plan?.length ? r.datos.plan : r.datos.partes).forEach((x) => {
         const k = `${x.material_id}|${x.color || ''}`;
         porColor[k] ??= { color: x.color, material: x.material, material_id: x.material_id, g: 0 };
         porColor[k].g += num(x.gramos);
@@ -217,11 +218,17 @@ async function vistaPreviaFilamento(p) {
     }).join('');
     const total = lista.reduce((t, c) => t + c.g, 0);
     const multi = lista.length > 1;
+    const cam = r.datos.cambio;
+    const bannerCambio = r.datos.plan?.length
+        ? `<div class="text-start mt-2 p-2 rounded" style="background:${cam && num(cam.sobrecosto) > 0.004 ? '#fff4f6' : '#eefaf2'};border:1px solid ${cam && num(cam.sobrecosto) > 0.004 ? '#f1b5c4' : '#b9e3c8'}">
+            <i class="bi bi-arrow-left-right"></i> <b>Colores cambiados respecto a la cotización.</b>
+            ${cam && num(cam.sobrecosto) > 0.004 ? `Cuesta <b class="neg">Q${num(cam.sobrecosto).toFixed(2)} más</b> y se resta de la ganancia.` : (cam && num(cam.sobrecosto) < -0.004 ? `Ahorra <b class="pos">Q${(-num(cam.sobrecosto)).toFixed(2)}</b> y se suma a la ganancia.` : 'El costo no cambia.')}</div>`
+        : '';
     return `<div class="text-start">
         <h6 class="mb-1">Filamento que se va a descontar${multi ? ` · <span class="neg">${lista.length} colores</span>` : ''}</h6>
         ${filas}
         <div class="d-flex justify-content-between pt-1"><b>Total</b><b>${total.toFixed(1)} g</b></div>
-    </div>${recordatorio}
+    </div>${bannerCambio}${recordatorio}
     <div class="text-start mt-2 p-2 rounded" style="background:#fff8e6;border:1px solid #f0d58a;border-left:5px solid #c99a14">
         <i class="bi bi-eye-fill"></i> <b>Revisa bien:</b> ¿los colores y la cantidad de colores coinciden con lo que vas a imprimir? Si la cotización quedó incompleta, cancela y corrígela antes.</div>`;
 }
@@ -242,13 +249,18 @@ async function avanzar(p) {
     const imprime = p.estado === 'solicitado';
     let previa = '';
     if (imprime) previa = await vistaPreviaFilamento(p);
+    // Los colores solo se cambian aquí (antes de imprimir): después ya sale del inventario
+    const puedeCambiar = imprime && (await get('pedidos/filamento', { id: p.id })).datos?.editable;
 
-    const { isConfirmed } = await Swal.fire({
+    const { isConfirmed, isDenied } = await Swal.fire({
         icon: imprime ? 'warning' : 'question',
         titleText: `¿Pasar “${p.nombre_mascota}” a ${sig.titulo}?`,
         width: imprime ? 640 : undefined,
         html: `${previa}<div class="${imprime ? 'mt-3' : ''}">Esta acción <b>no se puede deshacer</b>: el pedido ya no podrá regresar a “${esc(actual.titulo)}”.</div>${aviso}`,
         showCancelButton: true,
+        showDenyButton: Boolean(puedeCambiar),
+        denyButtonText: '<i class="bi bi-arrow-left-right"></i> Cambiar colores',
+        denyButtonColor: '#444',
         focusCancel: true,
         confirmButtonText: `Sí, pasar a ${sig.titulo}`,
         cancelButtonText: 'Cancelar',
@@ -275,6 +287,11 @@ async function avanzar(p) {
             cierre.observe(document.body, { childList: true, subtree: true });
         } : undefined,
     });
+    if (isDenied) {
+        // Cambió los colores: se vuelve a mostrar la confirmación ya con los colores nuevos
+        await editarColores(p);
+        return avanzar(p);
+    }
     if (!isConfirmed) return;
 
     const r = await post('pedidos/estado', { id: p.id, desde: p.estado });
@@ -299,6 +316,171 @@ function avisarFilamento(alertas) {
     });
 }
 
+// ── Cambiar los colores reales de un pedido que todavía no se imprime ──────
+// Los gramos y las horas son los de la cotización (ya laminados); solo cambia de qué color sale cada gramo.
+// Devuelve true si se guardó algo.
+async function editarColores(p, datos) {
+    const d = datos || (await get('pedidos/filamento', { id: p.id })).datos;
+    const total = num(d.total_g);
+    const merma = num(d.merma_pct);
+    const catalogo = d.colores || [];
+    if (!catalogo.length) {
+        await Swal.fire({ icon: 'info', title: 'No hay colores en inventario', text: 'Registra tus carretes en Inventario para poder elegirlos.', confirmButtonColor: ORO });
+        return false;
+    }
+
+    // Punto de partida: lo ya elegido, o los colores de la cotización juntados por color
+    const base = {};
+    const origen = d.plan?.length ? d.plan : d.partes;
+    origen.forEach((x) => {
+        const k = `${x.material_id}|${x.color || ''}`;
+        base[k] ??= { clave: k, g: 0 };
+        base[k].g += num(x.gramos);
+    });
+    const filasIni = Object.values(base).map((b) => {
+        const c = catalogo.find((x) => `${x.material_id}|${x.color}`.toLowerCase() === b.clave.toLowerCase());
+        return { clave: c ? `${c.material_id}|${c.color}` : '', g: Number(b.g.toFixed(2)) };
+    });
+    const porClave = (k) => catalogo.find((c) => `${c.material_id}|${c.color}` === k);
+
+    const { isConfirmed } = await Swal.fire({
+        titleText: `Colores reales · ${p.nombre_mascota}`,
+        width: 680,
+        html: `<div class="text-start">
+            <div class="hc-ayuda mb-2">Reparte los <b>${total.toFixed(1)} g</b> de la cotización entre los colores que de verdad vas a usar (como los da Bambu Studio, sin merma). Los gramos totales y las horas no cambian.</div>
+            <div id="cfFilas"></div>
+            <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline-dark" id="cfMas"><i class="bi bi-plus-lg"></i> Agregar color</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="cfResto">Poner lo que falta</button>
+            </div>
+            <div id="cfCuenta" class="mt-3 fw-bold"></div>
+            <div id="cfCosto" class="mt-2"></div>
+        </div>`,
+        showCancelButton: true,
+        showDenyButton: Boolean(d.plan?.length),
+        denyButtonText: 'Volver a la cotización',
+        confirmButtonText: 'Guardar colores',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: ORO,
+        didOpen: (pop) => {
+            const cont = pop.querySelector('#cfFilas');
+            const btnOk = Swal.getConfirmButton();
+            const nuevaFila = (clave = '', g = '') => {
+                const div = document.createElement('div');
+                div.className = 'd-flex gap-2 align-items-center mb-2 cf-fila';
+                div.innerHTML = `<div class="cf-sel" style="flex:1;min-width:0"></div>
+                    <input type="number" class="form-control cf-g" min="0" step="0.01" placeholder="Gramos" style="max-width:130px" value="${g}">
+                    <button type="button" class="btn btn-outline-danger cf-quitar" title="Quitar"><i class="bi bi-x-lg"></i></button>`;
+                const [mid, ...resto] = String(clave).split('|');
+                const sc = selectorColor({
+                    items: catalogo,
+                    valor: clave ? { material_id: mid, color: resto.join('|') } : null,
+                    // "Igual que la fila de arriba": el color de la fila anterior
+                    anterior: () => {
+                        const filas = [...cont.querySelectorAll('.cf-fila')];
+                        for (let i = filas.indexOf(div) - 1; i >= 0; i--) {
+                            const s = filas[i].__sc.get();
+                            if (s) return s;
+                        }
+                        return null;
+                    },
+                    alCambiar: () => refrescar(),
+                });
+                div.__sc = sc;
+                div.querySelector('.cf-sel').appendChild(sc.el);
+                cont.appendChild(div);
+            };
+            const claveDe = (f) => { const s = f.__sc.get(); return s ? `${s.material_id}|${s.color}` : ''; };
+            const leer = () => [...cont.querySelectorAll('.cf-fila')].map((f) => ({ clave: claveDe(f), g: parseFloat(f.querySelector('.cf-g').value) || 0 }));
+            const refrescar = () => {
+                const filas = leer();
+                const suma = filas.reduce((s, f) => s + f.g, 0);
+                const dif = total - suma;
+                const exacto = Math.abs(dif) <= 0.1 + 1e-9;
+                const completas = filas.length > 0 && filas.every((f) => f.clave && f.g > 0);
+                pop.querySelector('#cfCuenta').innerHTML = exacto
+                    ? `<span class="pos"><i class="bi bi-check-circle-fill"></i> Asignado ${suma.toFixed(1)} de ${total.toFixed(1)} g</span>`
+                    : `<span class="neg"><i class="bi bi-x-circle-fill"></i> Asignado ${suma.toFixed(1)} de ${total.toFixed(1)} g · ${dif > 0 ? `faltan ${dif.toFixed(1)} g` : `sobran ${Math.abs(dif).toFixed(1)} g`}</span>`;
+                btnOk.disabled = !(exacto && completas);
+
+                // Costo: el mismo criterio de la cotización (mayor entre referencia del material y costo real del color)
+                let nuevo = 0;
+                const sinAlcance = [];
+                const juntos = {};
+                filas.forEach((f) => { if (f.clave) juntos[f.clave] = (juntos[f.clave] || 0) + f.g; });
+                Object.entries(juntos).forEach(([k, g]) => {
+                    const c = porClave(k);
+                    if (!c) return;
+                    nuevo += g / 1000 * num(c.cotiza_a);
+                    if (g * (1 + merma / 100) > num(c.gramos)) sinAlcance.push(`${c.color} (hay ${Math.round(c.gramos)} g)`);
+                });
+                nuevo = Math.round(nuevo * (1 + merma / 100) * 100) / 100;
+                const cot = num(d.costo_cotizado);
+                const sobre = Math.round((nuevo - cot) * 100) / 100;
+                let costoHtml = `<div class="hc-ayuda">Material cotizado: ${Q(cot)} · con estos colores: <b>${Q(nuevo)}</b></div>`;
+                if (exacto && completas) {
+                    if (sobre > 0.004) {
+                        costoHtml = `<div class="p-2 rounded" style="background:#fff4f6;border:1px solid #f1b5c4;border-left:5px solid #d6336c">
+                            <i class="bi bi-exclamation-triangle-fill neg"></i> <b>Estos colores cuestan Q${sobre.toFixed(2)} más</b> que lo cotizado (${Q(cot)} → ${Q(nuevo)}). Ese dinero <b>se resta de la ganancia</b> de esta venta. Para la próxima cotización, usa los colores que de verdad vas a imprimir.</div>`;
+                    } else if (sobre < -0.004) {
+                        costoHtml = `<div class="p-2 rounded" style="background:#eefaf2;border:1px solid #b9e3c8"><i class="bi bi-piggy-bank-fill pos"></i> <b>Estos colores ahorran Q${(-sobre).toFixed(2)}</b> (${Q(cot)} → ${Q(nuevo)}). Ese ahorro <b>se suma a la ganancia</b> de esta venta.</div>`;
+                    } else {
+                        costoHtml = `<div class="p-2 rounded" style="background:#eefaf2;border:1px solid #b9e3c8"><i class="bi bi-check-circle-fill pos"></i> El costo no cambia (${Q(cot)} → ${Q(nuevo)}). La ganancia no cambia.</div>`;
+                    }
+                }
+                if (sinAlcance.length) costoHtml += `<div class="neg small mt-1"><i class="bi bi-exclamation-triangle-fill"></i> No alcanza con la merma: ${sinAlcance.map(esc).join(', ')}</div>`;
+                pop.querySelector('#cfCosto').innerHTML = costoHtml;
+            };
+            (filasIni.length ? filasIni : [{ clave: '', g: '' }]).forEach((f) => nuevaFila(f.clave, f.g));
+            pop.querySelector('#cfMas').addEventListener('click', () => { nuevaFila(); refrescar(); });
+            pop.querySelector('#cfResto').addEventListener('click', () => {
+                const filas = [...cont.querySelectorAll('.cf-fila')];
+                const ult = filas[filas.length - 1];
+                if (!ult) return;
+                const otras = leer().slice(0, -1).reduce((s, f) => s + f.g, 0);
+                ult.querySelector('.cf-g').value = Math.max(0, total - otras).toFixed(2);
+                refrescar();
+            });
+            cont.addEventListener('click', (e) => {
+                if (e.target.closest('.cf-quitar')) {
+                    if (cont.querySelectorAll('.cf-fila').length > 1) e.target.closest('.cf-fila').remove();
+                    refrescar();
+                }
+            });
+            cont.addEventListener('input', refrescar);
+            cont.addEventListener('change', refrescar);
+            refrescar();
+        },
+        preConfirm: () => {
+            const filas = [...document.querySelectorAll('.cf-fila')].map((f) => {
+                const s = f.__sc.get();
+                const [mid, ...resto] = (s ? `${s.material_id}|${s.color}` : '|').split('|');
+                return { material_id: Number(mid), color: resto.join('|'), gramos: parseFloat(f.querySelector('.cf-g').value) || 0 };
+            });
+            return filas;
+        },
+    }).then(async (res) => {
+        if (res.isDenied) {
+            const r = await post('pedidos/filamento-restablecer', { id: p.id });
+            if (r.codigo !== 1) { await error(r); return { isConfirmed: false }; }
+            toast.fire({ icon: 'success', title: r.mensaje });
+            return { isConfirmed: true };
+        }
+        if (!res.isConfirmed) return { isConfirmed: false };
+        const r = await post('pedidos/filamento-guardar', { id: p.id, items: JSON.stringify(res.value) });
+        if (r.codigo !== 1) { await error(r); return { isConfirmed: false }; }
+        if (num(r.sobrecosto) > 0.004) {
+            await Swal.fire({ icon: 'warning', title: 'Colores guardados', html: `El cambio cuesta <b>Q${num(r.sobrecosto).toFixed(2)} más</b> y se resta de la ganancia de esta venta.`, confirmButtonColor: ORO });
+        } else if (num(r.sobrecosto) < -0.004) {
+            await Swal.fire({ icon: 'success', title: 'Colores guardados', html: `El cambio ahorra <b>Q${(-num(r.sobrecosto)).toFixed(2)}</b> y se suma a la ganancia de esta venta.`, confirmButtonColor: ORO });
+        } else {
+            toast.fire({ icon: 'success', title: r.mensaje });
+        }
+        return { isConfirmed: true };
+    });
+    return isConfirmed;
+}
+
 // ── Filamento de la pieza: qué lleva según la cotización y qué ya salió del inventario ──
 const hrs = (min) => {
     const m = Math.round(num(min));
@@ -308,7 +490,7 @@ const hrs = (min) => {
 async function filamento(p) {
     const r = await get('pedidos/filamento', { id: p.id });
     if (r.codigo !== 1) return error(r);
-    const { partes, consumos, sin_cotizacion: sinCot, merma_pct: merma } = r.datos;
+    const { partes, consumos, sin_cotizacion: sinCot, merma_pct: merma, plan, cambio } = r.datos;
 
     if (!partes.length) {
         return Swal.fire({
@@ -325,7 +507,7 @@ async function filamento(p) {
 
     // Total por color (suma las partes del mismo color)
     const porColor = {};
-    partes.forEach((x) => {
+    (plan?.length ? plan : partes).forEach((x) => {
         const k = `${x.color || ''}|${x.material}`;
         porColor[k] ??= { color: x.color, material: x.material, g: 0 };
         porColor[k].g += num(x.gramos);
@@ -348,11 +530,19 @@ async function filamento(p) {
         <div class="hc-ayuda mt-1">Incluye la merma presupuestada${fallaG > 0 ? ` y ${fallaG.toFixed(0)} g perdidos en fallas` : ''}.</div>`
         : '<div class="hc-ayuda mt-3"><i class="bi bi-info-circle"></i> Todavía no se descuenta nada del inventario: sale cuando el pedido pasa a Imprimiendo.</div>';
 
-    await Swal.fire({
+    const bannerCambio = plan?.length ? `<div class="mb-2 p-2 rounded" style="background:${cambio && num(cambio.sobrecosto) > 0.004 ? '#fff4f6' : '#eefaf2'};border:1px solid ${cambio && num(cambio.sobrecosto) > 0.004 ? '#f1b5c4' : '#b9e3c8'}">
+            <i class="bi bi-arrow-left-right"></i> <b>Colores cambiados respecto a la cotización.</b>
+            ${cambio ? `Material cotizado ${Q(cambio.costo_cotizado)} → con estos colores ${Q(cambio.costo_nuevo)}. ` : ''}${cambio && num(cambio.sobrecosto) > 0.004 ? `<b class="neg">Q${num(cambio.sobrecosto).toFixed(2)} más, restados de la ganancia de esta venta.</b>` : (cambio && num(cambio.sobrecosto) < -0.004 ? `<b class="pos">Ahorra Q${(-num(cambio.sobrecosto)).toFixed(2)}, sumados a la ganancia de esta venta.</b>` : 'El costo no cambia.')}</div>` : '';
+
+    const res = await Swal.fire({
         titleText: `Filamento · ${p.nombre_mascota}`,
         width: 640,
+        showDenyButton: Boolean(r.datos.editable),
+        denyButtonText: '<i class="bi bi-arrow-left-right"></i> Cambiar colores',
+        denyButtonColor: '#444',
         html: `<div class="text-start small">
-            <h6>Por color <span class="hc-ayuda">(según la cotización)</span></h6>
+            ${bannerCambio}
+            <h6>Por color <span class="hc-ayuda">(${plan?.length ? 'los que de verdad vas a usar' : 'según la cotización'})</span></h6>
             ${chips}
             <div class="d-flex justify-content-between pt-2"><b>Total</b><b>${totalG.toFixed(2)} g · ${hrs(totalMin)}</b></div>
             ${merma > 0 ? `<div class="hc-ayuda">Más ${num(merma)}% de merma al imprimir: ≈ ${(totalG * (1 + merma / 100)).toFixed(0)} g reales.</div>` : ''}
@@ -363,6 +553,10 @@ async function filamento(p) {
         confirmButtonText: 'Cerrar',
         confirmButtonColor: ORO,
     });
+    if (res.isDenied) {
+        await editarColores(p, r.datos);
+        filamento(p);
+    }
 }
 
 // ── Impresión fallida: el filamento perdido sale del carrete y se suma al costo de la pieza ──
@@ -370,20 +564,34 @@ const MOTIVOS_FALLA = ['Espagueti (se soltó la pieza)', 'Se despegó de la cama
 
 async function falla(p) {
     const r = await get('pedidos/carretes', { id: p.id });
+    // Solo los carretes de los colores que lleva ESTA impresión
     const carretes = r.datos || [];
     if (!carretes.length) {
-        return Swal.fire({ icon: 'info', title: 'No hay carretes con filamento', text: 'Registra tus carretes en Gastos > Inventario de filamento.', confirmButtonColor: ORO });
+        return Swal.fire({ icon: 'info', title: 'No hay filamento de esta pieza', text: 'Los carretes de los colores que usa esta impresión no tienen filamento (o no están registrados en Gastos > Inventario de filamento).', confirmButtonColor: ORO });
     }
-    const opcionesK = carretes.map((k) => `<option value="${k.id}">${k.sugerido ? '★ ' : ''}${esc(k.color)} · ${esc(k.material)} · ${gr(k.gramos_actuales)}</option>`).join('');
+    const Q0 = (n) => `Q${num(n).toLocaleString('es-GT', { maximumFractionDigits: 0 })}`;
+    // Si hay dos carretes del mismo color y material, se distinguen por su número
+    const repetidos = {};
+    carretes.forEach((k) => { const c = `${k.material_id}|${k.color}`; repetidos[c] = (repetidos[c] || 0) + 1; });
+    const items = carretes.map((k) => ({
+        id: k.id,
+        material_id: k.material_id,
+        material: k.material,
+        color: k.color,
+        gramos: num(k.gramos_actuales),
+        etiqueta: repetidos[`${k.material_id}|${k.color}`] > 1 ? `carrete #${k.id}` : '',
+        der: `costó ${Q0(num(k.costo) / num(k.peso_inicial_g) * 1000)}/kg`,
+    }));
+    let carrete = null;
 
     const { value } = await Swal.fire({
         titleText: `Falló “${p.nombre_mascota}”`,
         width: 520,
         html: `
             <div class="text-start">
-                <div class="hc-ayuda mb-2">El filamento perdido sale del carrete y su costo se suma a <b>esta pieza</b> (baja su ganancia). El pedido sigue en Imprimiendo. ★ = color de esta pieza.</div>
+                <div class="hc-ayuda mb-2">El filamento perdido sale del carrete y su costo se suma a <b>esta pieza</b> (baja su ganancia). El pedido sigue en Imprimiendo. Solo salen los colores que lleva esta impresión.</div>
                 <label class="form-label mb-1">Carrete que se usó</label>
-                <select id="fCarrete" class="form-select mb-2">${opcionesK}</select>
+                <div id="fCarreteSel" class="mb-2"></div>
                 <label class="form-label mb-1">Gramos perdidos</label>
                 <input id="fGramos" type="number" min="1" step="any" class="form-control mb-1" placeholder="Ej. 80">
                 <div id="fCosto" class="hc-ayuda mb-2"></div>
@@ -393,13 +601,15 @@ async function falla(p) {
             </div>`,
         didOpen: (pop) => {
             const refrescar = () => {
-                const k = carretes.find((x) => String(x.id) === pop.querySelector('#fCarrete').value);
+                const k = carretes.find((x) => String(x.id) === String(carrete?.get()?.id));
                 const g = parseFloat(pop.querySelector('#fGramos').value) || 0;
                 pop.querySelector('#fCosto').innerHTML = k && g > 0
                     ? `Cuesta <b>${Q(g * num(k.costo) / num(k.peso_inicial_g))}</b>${g > num(k.gramos_actuales) ? ' · <span class="neg">el carrete solo tiene ' + gr(k.gramos_actuales) + '</span>' : ''}`
                     : '';
                 pop.querySelector('#fOtro').classList.toggle('d-none', pop.querySelector('#fMotivo').value !== 'Otro');
             };
+            carrete = selectorColor({ items, valor: items[0], alCambiar: () => refrescar(), vacio: 'Elige el carrete…' });
+            pop.querySelector('#fCarreteSel').appendChild(carrete.el);
             pop.addEventListener('input', refrescar);
             refrescar();
         },
@@ -415,7 +625,9 @@ async function falla(p) {
             if (motivo === 'Otro') motivo = pop.querySelector('#fOtro').value.trim();
             if (!(gramos > 0)) { Swal.showValidationMessage('Escribe los gramos perdidos'); return false; }
             if (motivo.length < 3) { Swal.showValidationMessage('Describe qué pasó'); return false; }
-            return { id: p.id, carrete_id: pop.querySelector('#fCarrete').value, gramos, motivo };
+            const sel = carrete.get();
+            if (!sel) { Swal.showValidationMessage('Elige el carrete'); return false; }
+            return { id: p.id, carrete_id: sel.id, gramos, motivo };
         },
     });
     if (!value) return;

@@ -119,12 +119,16 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
 
     .parte-fila {
         display: grid;
-        grid-template-columns: .9fr .9fr 1.9fr .7fr .6fr .6fr auto;
+        grid-template-columns: .9fr 2.8fr .7fr .6fr .6fr auto;
         gap: .4rem;
         margin-bottom: .4rem;
     }
 
+    .parte-fila .p-sel { min-width: 0; }
+
     @media (max-width: 767px) {
+        .parte-fila .p-sel { grid-column: 1 / -1; }
+
         .parte-fila {
             grid-template-columns: 1fr 1fr;
             padding-bottom: .6rem;
@@ -284,7 +288,7 @@ $base = !empty($_ENV['APP_NAME']) ? '/' . $_ENV['APP_NAME'] : '';
                 </div>
                 <p class="hc-ayuda">Una fila por cada placa que imprimes, con los gramos y el tiempo que marca Bambu Studio.</p>
                 <div class="parte-fila d-none d-md-grid hc-ayuda fw-bold">
-                    <span>Nombre</span><span>Material</span><span>Color</span><span>Gramos</span><span>Horas</span><span>Min</span><span></span>
+                    <span>Nombre</span><span>Color y material</span><span>Gramos</span><span>Horas</span><span>Min</span><span></span>
                 </div>
                 <div id="partes"></div>
             </div>
